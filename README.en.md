@@ -210,9 +210,31 @@ Deliberate trade-offs:
 Listed honestly, to save you some debugging:
 
 - **A reload loses that plugin's in-memory state** (in-flight connections, caches, timers). Most plugins re-establish it on rebuild, but long-lived-connection plugins may see a brief interruption at the moment of reload
-- **Replacing a package version via the plugin manager still requires a restart** — package installation is a different path, outside this plugin's scope
 - **It depends on host internals** — module replacement needs Node's internal loader structures (`--expose-internals`) and Cordis's `registry`/`loader`, which are not stable public APIs. A DSH upgrade may require follow-up adaptation
 - **Host side only** — the browser side (`lib/client.js` etc.) is handled by DSH's own `dsh-client-hmr` and is unaffected by this plugin
+
+### ⚠️ What this plugin cannot do: install / update a plugin package
+
+**Two different things must be kept apart** — their mechanisms are entirely different:
+
+| What you do | This plugin | Restart needed? |
+|---|---|---|
+| Edit plugin **source** (`lib/*.js`) | ✅ handles it, live within a second | No |
+| Install / update a plugin **package** (version change) | ❌ cannot | **Yes** |
+
+The latter is a DSH limitation, not this plugin's. The DSH plugin manager records the reason itself when it hits this:
+
+```
+dsh-mnemon: the running host holds its files open, so the update did not apply;
+package.json and pnpm-lock.yaml restored, previous build still has a loadable entry, nothing reinstalled
+→ use the app's own Settings → Plugins instead (after restarting, or after disabling the plugin loading that package)
+```
+
+**Root cause**: the running host has already loaded that plugin into memory. On Windows, the files of a loaded module are mapped into the process, so when pnpm tries to "move the directory aside and swap in a new one" it hits `EPERM`. This is an inherent DSH-vs-Windows conflict that **predates this plugin** (the earliest package-install failure residue on this machine traces back 26 hours before the plugin was installed).
+
+**What this plugin does about it is "step aside", not "take over"**: on detecting an in-progress pnpm operation it pauses scanning so it doesn't interfere while directories are being swapped, and rebuilds its baseline once the operation ends.
+
+**The right way**: update plugin packages from the app's Settings → Plugins and restart as prompted. This plugin does not try to bypass that limit — bypassing it would mean mutating the files of a running module, which is a shortcut to crashing the host.
 
 ## Implementation notes
 
