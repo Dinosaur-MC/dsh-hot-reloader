@@ -172,7 +172,12 @@ Override the row in your profile's `cordis.patch.yml`:
     ignore: ['.bak', '.test.', '.spec.', '.map']   # skip by filename substring
     maxDepth: 8           # max directory recursion depth
     quiet: false          # quiet mode: only record failures
+    installQuietMs: 8000  # how long to step aside after a package-manager op is seen (ms); 0 = off
+    profileDir: ''        # the profile directory; derived from the loader tree by default
 ```
+
+`installQuietMs` is the **step-aside mechanism**: on detecting that pnpm is operating (rewriting `pnpm-lock.yaml`, `.modules.yaml`, etc.) the plugin pauses scanning so it doesn't interfere while directories are being swapped. The default 8-second window covers an ordinary install; raise it for very large packages. Setting it to `0` disables the step-aside (not recommended — scanning during an install can catch a half-written package).
+
 
 A couple of practical setups:
 
@@ -247,6 +252,16 @@ Three practical constraints:
 3. Some people run on network mounts or sync drives, which produce no filesystem events at all
 
 The cost of polling is one `statSync` per second. Measured at 19–20 plugins / ~227 files, the overhead is negligible.
+
+### Does polling interfere with package installs?
+
+**No** — and I ran a controlled experiment specifically because I was worried about it.
+
+On Windows, pnpm replaces a package by "move the directory aside → put the new one in → rename it back". Any other process holding a handle on that directory would cause `EPERM`. Across three groups (no watching / loaded + polling every second / cold directory), the rename failure rate stayed at the same noise level — **polling added nothing**: `readdirSync` + `statSync` read a snapshot of directory entries and hold no handle that would block a rename.
+
+(For reference: package-install failures on this machine predate this plugin — the earliest failure residue is 26 hours older than the plugin.)
+
+The real risk is **timing**, not handles: during an install window the package is half-written, and reloading then would pick up a broken module. That's why the plugin **steps aside**: it pauses scanning when it detects a pnpm operation (`installQuietMs`) and rebuilds its baseline once the window ends.
 
 ### On Node's ESM module cache
 
