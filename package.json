@@ -1,0 +1,47 @@
+{
+  "name": "dsh-hot-reloader",
+  "version": "0.1.0",
+  "description": "DSH 插件热重载器：改完插件源码即刻生效，无需重启 DeepSeek Harness。补上宿主内置 dsh-hmr 因排除 node_modules 而覆盖不到的第三方插件场景。Hot-reload DSH plugin source without restarting the harness.",
+  "private": false,
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "hot-reload",
+    "hmr",
+    "live-reload",
+    "development"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xfgil/dsh-hot-reloader.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xfgil/dsh-hot-reloader/issues"
+  },
+  "homepage": "https://github.com/xfgil/dsh-hot-reloader#readme",
+  "author": "xfgil",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
