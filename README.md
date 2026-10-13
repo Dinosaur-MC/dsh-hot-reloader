@@ -8,12 +8,19 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)
 
+| |
+|---|
+| **`dsh-hot-reloader`** — 改完插件源码不用重启（本仓库） |
+| [`dsh-session-clock`](https://github.com/xfgil/dsh-session-clock) — 按会话授时与空闲间隔 |
+| [`dsh-onebot-guard`](https://github.com/xfgil/dsh-onebot-guard) — QQ 通道出站闸 |
+
 ---
 
 ## 目录
 
 - [这是什么](#这是什么)
 - [它到底解决了什么问题](#它到底解决了什么问题)
+- [环境要求](#环境要求)
 - [安装](#安装)
 - [使用](#使用)
 - [配置](#配置)
@@ -79,6 +86,79 @@ const isExcluded = (url) => url.startsWith("node:") || url.includes("/node_modul
 DSH 的 Web 客户端有一套独立的 HMR（`@deepseek-ai/dsh-client-hmr`），走 `/plugins/events` SSE 通道。**客户端代码的改动原本就不需要重启**。
 
 真正的痛点在 **host 侧**（`lib/index.js` 这类服务端代码），这正是本插件的目标。
+
+## 环境要求
+
+### DSH 宿主
+
+| 项 | 版本 |
+|---|---|
+| DSH | **0.2.0-rc.2**（本插件的开发与实测版本） |
+| Electron | 44.0.0 |
+| Node（宿主内嵌） | 24.18.1 |
+| V8 | 15.2 |
+| Cordis | 4.0.4 |
+
+### 前置条件（本插件比别的插件更挑环境，务必先读）
+
+**1. 宿主必须带 `--expose-internals` 启动。**
+
+模块替换依赖 Node 的 loader 内部结构。插件构造函数里有这条硬检查：
+
+```js
+if (!this.ctx.loader.internal) throw new Error('--expose-internals is required for HMR service')
+```
+
+DSH 桌面版的宿主进程**默认就带**这个旗标（实测命令行）：
+`DeepSeek Harness.exe --expose-internals ...dsh-desktop-host/lib/index.js ...`。
+所以正常情况下无需你操心。**但如果宿主没带，本插件无法工作**——
+这不是可以绕过的配置项，是 Node 的模块系统边界。
+
+**2. 建议同时启用宿主内置的 `@deepseek-ai/dsh-hmr`（可选，但推荐）。**
+
+本插件**复用**它的实例：解析模块走它的 `_resolve()`，替换动作走它的
+`runExclusive()` 事务（避免和内置 HMR 撞车）。
+
+```js
+const hmr = ctx.get('hmr')
+if (hmr && typeof hmr._resolve === 'function') { /* 用它的解析 */ }
+// ...
+if (hmr && typeof hmr.runExclusive === 'function') { await hmr.runExclusive(run) }
+```
+
+**两条路都有自实现兜底**：拿不到 `hmr` 时退回 `ctx.loader.internal.resolveSync`
+与直接执行，插件照常工作。所以它是优化而非硬依赖。
+
+不过它默认就是启用的，而且它的问题正是本插件存在的理由：
+
+```yaml
+# 内置 HMR 在 dsh-base/cordis.patch.yml 里是这样挂的：
+- id: hmr
+  name: '@deepseek-ai/dsh-hmr'
+  disabled: !!js "!ctx.get('profileContext')"   # 有 profileContext 时启用
+  config:
+    root: []                                     # ← 只重载 profile 配置，不监听源码模块
+```
+
+`root: []` 意味着内置 HMR 不监听任何源码目录；而且它有两处硬编码排除 node_modules
+（`loadDependencies` 与 `analyzeChanges`），第三方插件永远进不了它的依赖图。
+**本插件补的就是这块**，同时借用它的事务机制。
+
+**3. 装在 profile 侧，目录必须在 profile 的 `node_modules` 之外**（或走 link 安装）。
+
+link 安装（`link:D:/path/to/plugins/...`）是被支持的路径。
+若你直接把包放进 `node_modules`，升级会覆盖它——和所有 profile 插件一样。
+
+**4. 零外部依赖。** 只用 `node:fs` / `node:path` / `node:url` / `node:module`。
+这不是洁癖：profile 的 `node_modules` 里**解析不到** `chokidar` / `picomatch`
+（只有 `cosmokit`、`schemastery` 等极少数包），这是「为什么用轮询」的根本原因。
+
+### 不需要的东西
+
+- **不需要重启 DSH** 就能让本插件生效（宿主内置 HMR 会 reconcile profile 清单）。
+- **不需要额外端口**，走宿主的 `webServer`。
+
+---
 
 ## 安装
 

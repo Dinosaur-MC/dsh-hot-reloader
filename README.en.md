@@ -8,12 +8,19 @@ English | [中文](README.md)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)
 
+| |
+|---|
+| **`dsh-hot-reloader`** — edit plugin source without restarting (this repo) |
+| [`dsh-session-clock`](https://github.com/xfgil/dsh-session-clock) — per-session clock and idle gaps |
+| [`dsh-onebot-guard`](https://github.com/xfgil/dsh-onebot-guard) — QQ channel outbound gate |
+
 ---
 
 ## Contents
 
 - [What this is](#what-this-is)
 - [The problem it actually solves](#the-problem-it-actually-solves)
+- [Requirements](#requirements)
 - [Install](#install)
 - [Usage](#usage)
 - [Configuration](#configuration)
@@ -80,6 +87,86 @@ So the chain breaks like this:
 DSH's Web client has its own separate HMR (`@deepseek-ai/dsh-client-hmr`) over a `/plugins/events` SSE channel. **Client-side changes never needed a restart.**
 
 The real pain is on the **host side** (server code like `lib/index.js`), which is exactly what this plugin targets.
+
+## Requirements
+
+### DSH host
+
+| Item | Version |
+|---|---|
+| DSH | **0.2.0-rc.2** (this plugin's development and test baseline) |
+| Electron | 44.0.0 |
+| Node (embedded in host) | 24.18.1 |
+| V8 | 15.2 |
+| Cordis | 4.0.4 |
+
+### Prerequisites (this plugin is pickier than most — please read)
+
+**1. The host must start with `--expose-internals`.**
+
+Module replacement relies on Node's internal loader structures. The plugin has a hard
+check in its constructor:
+
+```js
+if (!this.ctx.loader.internal) throw new Error('--expose-internals is required for HMR service')
+```
+
+The DSH desktop host **already passes this flag by default** (observed command line):
+`DeepSeek Harness.exe --expose-internals ...dsh-desktop-host/lib/index.js ...`.
+So in practice there is nothing to configure. **But if your host lacks the flag, this
+plugin cannot work** — it is not a settable option, it is a boundary of Node's module system.
+
+**2. Enabling the built-in `@deepseek-ai/dsh-hmr` is recommended (optional, but advised).**
+
+This plugin **reuses** that service: module resolution goes through its `_resolve()`,
+and replacement runs inside its `runExclusive()` transaction (so it never races the
+built-in HMR).
+
+```js
+const hmr = ctx.get('hmr')
+if (hmr && typeof hmr._resolve === 'function') { /* use its resolver */ }
+// ...
+if (hmr && typeof hmr.runExclusive === 'function') { await hmr.runExclusive(run) }
+```
+
+**Both paths have a self-implemented fallback**: without `hmr` the plugin falls back to
+`ctx.loader.internal.resolveSync` and direct execution, and keeps working. So it is an
+optimization, not a hard dependency.
+
+It is enabled by default anyway, and its limitation is precisely why this plugin exists:
+
+```yaml
+# how the built-in HMR is mounted in dsh-base/cordis.patch.yml:
+- id: hmr
+  name: '@deepseek-ai/dsh-hmr'
+  disabled: !!js "!ctx.get('profileContext')"   # enabled when a profileContext exists
+  config:
+    root: []                                     # ← reloads profile config only, watches no source
+```
+
+`root: []` means the built-in HMR watches no source directory at all, and it hard-codes
+two exclusions of `node_modules` (`loadDependencies` and `analyzeChanges`), so a
+third-party plugin can never enter its dependency graph. **That gap is what this plugin
+fills**, while borrowing its transaction machinery.
+
+**3. Installed on the profile side, and its directory must live outside the profile's
+`node_modules`** (or be installed via link).
+
+Link installs (`link:D:/path/to/plugins/...`) are a supported path. If you drop the package
+straight into `node_modules`, an upgrade will overwrite it — same as any profile plugin.
+
+**4. Zero external dependencies.** Only `node:fs` / `node:path` / `node:url` / `node:module`.
+This is not fastidiousness: the profile's `node_modules` **cannot resolve** `chokidar` /
+`picomatch` (only a handful of packages like `cosmokit` and `schemastery` are there),
+which is the root reason for "why polling instead of file watching".
+
+### What you do NOT need
+
+- **No DSH restart** is needed for this plugin to take effect (the built-in HMR
+  reconciles the profile manifest).
+- **No extra port** — it rides the host's `webServer`.
+
+---
 
 ## Install
 
