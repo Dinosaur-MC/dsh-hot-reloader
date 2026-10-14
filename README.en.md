@@ -12,7 +12,7 @@ English | [中文](README.md)
 |---|
 | **`dsh-hot-reloader`** — edit plugin source without restarting (this repo) |
 | [`dsh-session-clock`](https://github.com/xfgil/dsh-session-clock) — per-session clock and idle gaps |
-| [`dsh-onebot-guard`](https://github.com/xfgil/dsh-onebot-guard) — QQ channel outbound gate |
+| [`dsh-onebot-companion`](https://github.com/xfgil/dsh-onebot-companion) — QQ channel all-in-one: outbound gate, rules, rhythm, persona, voice |
 
 ---
 
