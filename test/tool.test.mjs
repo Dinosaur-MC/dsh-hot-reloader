@@ -26,6 +26,7 @@ function stubDeps(over = {}) {
       async listTargets(input) { calls.list.push(input); return { targets: [{ pkg: 'dsh-our-free-model', root: 'F:\\AgentGarden\\projects\\x', inWorkspace: true }] } },
       async reload(input) { calls.reload.push(input); return { reloaded: [{ pkg: 'dsh-our-free-model', ms: 12, fibers: 1 }], skipped: [], failed: [] } },
       async setAuto(input) { calls.auto.push(input); return { ok: true, enabled: input.enabled, entryId: 'dsh-hot-reloader' } },
+      async getAuto() { calls.getAuto = (calls.getAuto ?? 0) + 1; return { enabled: false, source: 'config', runtimeOverride: null, configEnabled: false, reloadSelf: false, allowForeignTargets: false, quiet: false, settingsAvailable: true } },
       ...over,
     },
   }
@@ -73,6 +74,18 @@ test('execute：默认 action=reload，选择器为空、工作区取自会话',
   assert.equal(value.reloaded[0].pkg, 'dsh-our-free-model')
 })
 
+test('渲染：只读模式输出开关状态（自动重载/自身/跨工作区）', async () => {
+  const { deps } = stubDeps()
+  const { definition } = await register(deps)
+  const value = await definition.execute({ action: 'auto' }, exec)
+  const blocks = definition.output.render({ action: 'auto' }, value)
+  assert.equal(Array.isArray(blocks), true)
+  assert.equal(blocks[0].type, 'text')
+  assert.match(blocks[0].text, /自动重载：关/)
+  assert.match(blocks[0].text, /自身自动重载：关/)
+  assert.match(blocks[0].text, /跨工作区：关/)
+})
+
 test('execute：action=list 只列目标，不触发重载', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
@@ -92,12 +105,17 @@ test('execute：dryRun 透传，且失败集合非空时 ok=false', async () => 
   assert.equal(value.ok, false)
 })
 
-test('execute：action=auto 必须带 enabled', async () => {
+test('execute：action=auto 省略 enabled = 只读当前状态', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
   const missing = await definition.execute({ action: 'auto' }, exec)
-  assert.equal(missing.ok, false)
-  assert.equal(missing.error, 'enabled-required')
+  // 省略 enabled = 只读当前状态（旧行为是报 enabled-required，模型既读不到、还可能为了读而写）
+  assert.equal(missing.ok, true)
+  assert.equal(missing.auto.readOnly, true)
+  assert.equal(missing.auto.enabled, false)
+  assert.equal(missing.auto.reloadSelf, false)
+  assert.equal(calls.auto.length, 0, '只读不得写盘')
+  assert.equal(calls.getAuto, 1, '只读应调用 getAuto 一次')
   assert.equal(calls.auto.length, 0)
   const written = await definition.execute({ action: 'auto', enabled: false }, exec)
   assert.deepEqual(calls.auto, [{ enabled: false }])

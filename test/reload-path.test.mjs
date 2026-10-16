@@ -115,6 +115,10 @@ test('/targets?all=1：工作区外的目标 reloadable=false 但 manualReloadab
   assert.equal(row.reloadable, false, '默认作用域内不可重载')
   assert.equal(row.manualReloadable, true, '已激活且非自身 ⇒ 点名可重载')
   assert.equal(row.blockedBy, 'outside-workspace')
+  // 开关状态随列表一起返回：模型用 list 就能读到，不必调用会写盘的 auto
+  assert.equal(typeof json.autoEnabled, 'boolean')
+  assert.equal(typeof json.reloadSelf, 'boolean')
+  assert.equal(json.quiet, false)
 })
 
 test('真重载路径：清缓存 → 重新 import → registry.delete → 重建 fiber', async () => {
