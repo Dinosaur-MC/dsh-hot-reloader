@@ -10,7 +10,7 @@ const React = {
   useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
   useEffect: () => {},
 }
-const primitives = { Checkbox: 'Checkbox', Button: 'Button' }
+const primitives = { Checkbox: function Checkbox() {}, Button: function Button() {} }
 
 /**
  * 客户端半是 `window.__ModuleLoader__.load({id, factory})` 形状；ESM 有缓存，只能 import 一次。
@@ -21,8 +21,14 @@ globalThis.window = { __ModuleLoader__: { load: (value) => { definition = value 
 await import('../lib/client.js')
 delete globalThis.window
 assert.ok(definition, '客户端半没有调用 window.__ModuleLoader__.load')
-const loadClientHalf = () => definition.factory((specifier) =>
-  specifier === 'react' ? React : specifier === '@deepseek-ai/dsh-client-ui-primitives' ? primitives : undefined)
+const loadClientHalf = (options = {}) => definition.factory((specifier) => {
+  if (specifier === 'react') return React
+  if (specifier === '@deepseek-ai/dsh-client-ui-primitives') {
+    if (options.noPrimitives === true) throw new Error('module not found')
+    return primitives
+  }
+  return undefined
+})
 
 /** 桩 ctx：捕获槽注册、locale、以及设置表单（scope）的写入。 */
 function stubCtx(over = {}) {
@@ -104,7 +110,7 @@ test('卡片渲染：开关勾选态来自宿主快照，标签走词典', () =>
   mod.apply(ctx)
   const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
   const checkbox = tree.props.children[0].props.children[0]
-  assert.equal(checkbox.type, 'Checkbox')
+  assert.equal(checkbox.type, primitives.Checkbox)
   assert.equal(checkbox.props.checked, true)
   assert.equal(checkbox.props.disabled, false)
   assert.equal(checkbox.props.label, 'autoReload')
@@ -143,4 +149,29 @@ test('卡片在拿不到 hooks 糖时也能渲染（自己订阅 store）', () =
   assert.equal(typeof face.subscribe, 'function')
   const tree = sectionOf(calls).component({ ...face, t: (key) => key })
   assert.equal(tree.type, 'div')
+})
+test('拿不到首方 primitives 时回落到纯 DOM input（卡片仍然可渲染）', () => {
+  const mod = loadClientHalf({ noPrimitives: true })
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
+  const label = tree.props.children[0].props.children[0]
+  assert.equal(label.type, 'label')
+  const input = label.props.children[0]
+  assert.equal(input.type, 'input')
+  assert.equal(input.props.checked, true)
+})
+
+test('注册的是兜底组件：渲染抛错时输出可见的错误文字，而不是空白', () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const entry = sectionOf(calls)
+  assert.equal(entry.component, mod.__internals.HotReloadCardSafe)
+  // 传入会让渲染抛错的 props（snapshot 抛）
+  const broken = { ...entry.options.inject(), t: (key) => key, snapshot: () => { throw new Error('boom') } }
+  const tree = entry.component(broken)
+  const text = JSON.stringify(tree)
+  assert.match(text, /card error/)
+  assert.match(text, /boom/)
 })
