@@ -28,7 +28,6 @@
 - [它是怎么做到的](#它是怎么做到的)
 - [已知限制](#已知限制)
 - [实现说明](#实现说明)
-- [开发](#开发)
 - [License](#license)
 
 ---
@@ -94,7 +93,7 @@ DSH 的 Web 客户端有一套独立的 HMR（`@deepseek-ai/dsh-client-hmr`）�
 
 | 项 | 版本 |
 |---|---|
-| DSH | **0.2.0-rc.2**（本插件的开发与实测版本） |
+| DSH | **0.2.0-rc.2**（实测于该版本） |
 | Electron | 44.0.0 |
 | Node（宿主内嵌） | 24.18.1 |
 | V8 | 15.2 |
@@ -315,7 +314,7 @@ package.json and pnpm-lock.yaml restored, previous build still has a loadable en
 → 请改在应用自己的「设置 → 插件」里操作（退出重启后，或先停用加载该包的插件再重启）
 ```
 
-**根因**：运行中的宿主已经把该插件加载进内存，Windows 上已加载模块的文件被映射进进程，pnpm 想「把目录挪走再换新的」就会撞上 `EPERM`。这是 DSH 与 Windows 的固有冲突，**在本插件存在之前就存在**（实测本机第一次装包失败残留可追溯到插件安装前 26 小时）。
+**根因**：运行中的宿主已经把该插件加载进内存，Windows 上已加载模块的文件被映射进进程，pnpm 想「把目录挪走再换新的」就会撞上 `EPERM`。这是 DSH 与 Windows 的固有冲突。
 
 **本插件为此做的是「让路」而不是「接管」**：检测到 pnpm 正在操作时暂停扫描，避免在换目录的窗口里添乱，操作结束后自动重建基线。
 
@@ -334,19 +333,9 @@ package.json and pnpm-lock.yaml restored, previous build still has a loadable en
 
 轮询的代价是每秒一次 `statSync`。实测 19~20 个插件 / 约 227 个文件，开销可以忽略。
 
-### 轮询会不会干扰装包？
-
-**不会**，这一点我专门做过对照实验，因为担心过。
-
-Windows 上 pnpm 替换包是「把目录挪开 → 放新的 → 改回名字」，如果这时有别的进程占着目录句柄就会 `EPERM`。实测三组对照（不监听 / 已加载+每秒轮询 / 冷目录），目录改名失败率都在同一噪声水平，**轮询没有额外影响**：`readdirSync` + `statSync` 读的是目录项快照，不持有会阻止改名的句柄。
-
-（对照本机记录：装包失败在本插件存在之前就有 —— 最早的失败残骸比插件安装早 26 小时。）
-
-真正需要担心的是**时序**而不是句柄：装包窗口里包是半成品，这时去重载会拿到残缺的模块。所以本插件做的是「让路」：识别到 pnpm 操作就暂停扫描（`installQuietMs`），窗口结束后重建基线。
-
 ### 关于 Node 的 ESM 模块缓存
 
-本插件的缓存清除逻辑是在**实测** Node 24 的 `LoadCache` 内部结构后确定的。它的真实形态是：
+Node 24 的 ESM `LoadCache` 内部结构是这样的：
 
 ```js
 class SafeMap extends Map {}
@@ -363,7 +352,7 @@ class LoadCache extends SafeMap {
 - 它是**两层结构**：URL → `{ type: ModuleJob }`
 - 它的 `delete()` **只把 type 槽置为 `undefined`，并不移除 key**
 
-因此本插件（与宿主 `dsh-hmr` 的做法一致）用 `Map.prototype.delete.call(cache, url)` 绕过被重写的方法，确保条目被彻底移除。实测确认：这样清理之后，模块会**真正重新执行**（用执行期自增的全局计数器验证过，不是靠时间戳猜的）。
+因此本插件（与宿主 `dsh-hmr` 的做法一致）用 `Map.prototype.delete.call(cache, url)` 绕过被重写的方法，确保条目被彻底移除；这样清理之后，模块会**真正重新执行**。
 
 ### 自举问题
 
@@ -372,28 +361,6 @@ class LoadCache extends SafeMap {
 但这里有个「先有鸡还是先有蛋」的真实问题：**当插件 entry 被重新激活时，宿主的 `loader.import(specifier)` 会命中模块缓存、拿回旧代码**——正是本插件要解决的那个问题本身。
 
 所以开发本插件时，如果需要把改动换上去，用状态接口的 `/self-reload`，它会走和普通插件完全相同的路径来替换自己。
-
-## 开发
-
-目录结构：
-
-```
-dsh-hot-reloader/
-├── lib/
-│   └── index.js          # 全部实现（零外部依赖，只用 node: 内置模块）
-├── cordis.patch.yml      # bundle 挂载声明
-├── package.json
-├── README.md             # 中文（本文件）
-└── README.en.md          # English
-```
-
-本插件**刻意保持零外部依赖**，只使用 `node:fs`、`node:path`、`node:url`、`node:module`。这不是洁癖——是上面「为什么用轮询」里说的第一条约束决定的。
-
-本地开发时，改 `lib/index.js` 后调一次自举接口即可生效：
-
-```bash
-curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/self-reload
-```
 
 ## License
 

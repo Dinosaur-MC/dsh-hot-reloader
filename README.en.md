@@ -28,7 +28,6 @@ English | [中文](README.md)
 - [How it works](#how-it-works)
 - [Known limitations](#known-limitations)
 - [Implementation notes](#implementation-notes)
-- [Development](#development)
 - [License](#license)
 
 ---
@@ -95,7 +94,7 @@ The real pain is on the **host side** (server code like `lib/index.js`), which i
 
 | Item | Version |
 |---|---|
-| DSH | **0.2.0-rc.2** (this plugin's development and test baseline) |
+| DSH | **0.2.0-rc.2** (tested on this version) |
 | Electron | 44.0.0 |
 | Node (embedded in host) | 24.18.1 |
 | V8 | 15.2 |
@@ -323,7 +322,7 @@ package.json and pnpm-lock.yaml restored, previous build still has a loadable en
 → use the app's own Settings → Plugins instead (after restarting, or after disabling the plugin loading that package)
 ```
 
-**Root cause**: the running host has already loaded that plugin into memory. On Windows, the files of a loaded module are mapped into the process, so when pnpm tries to "move the directory aside and swap in a new one" it hits `EPERM`. This is an inherent DSH-vs-Windows conflict that **predates this plugin** (the earliest package-install failure residue on this machine traces back 26 hours before the plugin was installed).
+**Root cause**: the running host has already loaded that plugin into memory. On Windows, the files of a loaded module are mapped into the process, so when pnpm tries to "move the directory aside and swap in a new one" it hits `EPERM`. This is an inherent DSH-vs-Windows conflict.
 
 **What this plugin does about it is "step aside", not "take over"**: on detecting an in-progress pnpm operation it pauses scanning so it doesn't interfere while directories are being swapped, and rebuilds its baseline once the operation ends.
 
@@ -341,19 +340,9 @@ Three practical constraints:
 
 The cost of polling is one `statSync` per second. Measured at 19–20 plugins / ~227 files, the overhead is negligible.
 
-### Does polling interfere with package installs?
-
-**No** — and I ran a controlled experiment specifically because I was worried about it.
-
-On Windows, pnpm replaces a package by "move the directory aside → put the new one in → rename it back". Any other process holding a handle on that directory would cause `EPERM`. Across three groups (no watching / loaded + polling every second / cold directory), the rename failure rate stayed at the same noise level — **polling added nothing**: `readdirSync` + `statSync` read a snapshot of directory entries and hold no handle that would block a rename.
-
-(For reference: package-install failures on this machine predate this plugin — the earliest failure residue is 26 hours older than the plugin.)
-
-The real risk is **timing**, not handles: during an install window the package is half-written, and reloading then would pick up a broken module. That's why the plugin **steps aside**: it pauses scanning when it detects a pnpm operation (`installQuietMs`) and rebuilds its baseline once the window ends.
-
 ### On Node's ESM module cache
 
-This plugin's cache-clearing logic was determined by **empirically inspecting** the internal structure of Node 24's `LoadCache`. Its real shape is:
+This plugin's cache-clearing logic targets the internal structure of Node 24's `LoadCache`, whose real shape is:
 
 ```js
 class SafeMap extends Map {}
@@ -370,7 +359,7 @@ Which means:
 - It is **two-layered**: URL → `{ type: ModuleJob }`
 - Its `delete()` **only sets the type slot to `undefined`; it does not remove the key**
 
-So this plugin (matching what the host's `dsh-hmr` does) uses `Map.prototype.delete.call(cache, url)` to bypass the overridden method and genuinely remove the entry. Verified empirically: after this, the module **really re-executes** (confirmed with an execution-time global counter, not by guessing from timestamps).
+So this plugin (matching what the host's `dsh-hmr` does) uses `Map.prototype.delete.call(cache, url)` to bypass the overridden method and genuinely remove the entry — after which the module **really re-executes**.
 
 ### The bootstrap problem
 
@@ -379,28 +368,6 @@ This plugin does not auto-reload itself by default (`reloadSelf: false`) — cha
 But there's a genuine chicken-and-egg problem here: **when a plugin entry is re-activated, the host's `loader.import(specifier)` hits the module cache and hands back the old code** — which is precisely the problem this plugin exists to solve.
 
 So when developing this plugin, if you need to get a change live, use the status endpoint's `/self-reload`; it replaces itself through exactly the same path it uses for any other plugin.
-
-## Development
-
-Layout:
-
-```
-dsh-hot-reloader/
-├── lib/
-│   └── index.js          # the whole implementation (zero external deps, node: builtins only)
-├── cordis.patch.yml      # bundle mount declaration
-├── package.json
-├── README.md             # 中文 (Chinese)
-└── README.en.md          # English (this file)
-```
-
-This plugin is **deliberately dependency-free**, using only `node:fs`, `node:path`, `node:url`, `node:module`. That's not fastidiousness — it follows from the first constraint under "Why polling instead of file watching" above.
-
-During local development, call the bootstrap endpoint once after editing `lib/index.js`:
-
-```bash
-curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/self-reload
-```
 
 ## License
 
