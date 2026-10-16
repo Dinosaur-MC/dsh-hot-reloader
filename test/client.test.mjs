@@ -328,3 +328,32 @@ test('可访问性：勾选框关联提示；写入被拒时失败行是 role=al
   assert.equal(alerts.length, 1)
   assert.equal(text(alerts[0]), 'saveFailed')
 })
+
+test('shortPath：长路径只留末两段，短路径原样（列表不再糊成一片）', () => {
+  const mod = loadClientHalf()
+  const { shortPath } = mod.__internals
+  const BS = String.fromCharCode(92)
+  assert.equal(shortPath(['C:', 'Users', 'Dinos', '.dsh', 'profiles', 'desktop', 'node_modules', 'pkg-a'].join(BS)), `…${BS}node_modules${BS}pkg-a`)
+  assert.equal(shortPath(['F:', 'ws', 'pkg-a'].join(BS)), ['F:', 'ws', 'pkg-a'].join(BS))
+  assert.equal(shortPath(''), '')
+  assert.equal(shortPath(null), '')
+  assert.equal(shortPath('/home/u/plugins/plug'), '…/plugins/plug')
+})
+
+test('列表行结构：内容列 + 操作列，显示短路径、完整路径进 title', () => {
+  const BS = String.fromCharCode(92)
+  const root = ['C:', 'Users', 'Dinos', '.dsh', 'profiles', 'desktop', 'node_modules', 'pkg-b'].join(BS)
+  const mod = loadClientHalf({ seq: [undefined, null, false, null, {
+    failed: false,
+    rows: [{ pkg: 'pkg-b', root, inWorkspace: false, activated: true, reloadable: true }],
+  }, null, null] })
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
+  assert.equal(byClass(tree, 'dshhr-item-main').length, 1)
+  assert.equal(byClass(tree, 'dshhr-item-action').length, 1)
+  const rootNode = byClass(tree, 'dshhr-root')[0]
+  assert.equal(rootNode.props.title, root, '完整路径进 title')
+  assert.match(text(rootNode), /^…/, '显示的是短路径')
+  assert.equal(byClass(tree, 'dshhr-button').length, 1, '操作列里是重载按钮')
+})
