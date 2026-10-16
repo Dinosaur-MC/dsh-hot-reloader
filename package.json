@@ -40,6 +40,22 @@
   "engines": {
     "node": ">=22"
   },
+  "scripts": {
+    "test": "node --test test/",
+    "link-peers": "node scripts/link-peers.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
