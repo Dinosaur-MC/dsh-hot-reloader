@@ -266,7 +266,10 @@ curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload \
 - `action:"list"` —— **默认只列可重载目标**（并给 hidden 汇总）；`all:true` 看全部条目（工作区外 / 入口未激活 / 本插件自身，各带 `blockedBy`）；
 - `action:"reload"`（默认）—— `targets` 留空 = **当前会话工作区内的全部插件**；
 - `dryRun:true` —— 只回报命中集合，不真的重载；
-- `action:"auto"` + `enabled` —— 切换持久开关。
+- `action:"auto"` —— **只读**返回开关状态（`enabled` / `source: config|runtime` / `reloadSelf` / `allowForeignTargets` / `quiet`）。
+  **LLM 没有写开关的能力**：传 `enabled` 会被拒绝（`error: "read-only"`）；开关只能由用户在宿主设置页或 `POST /auto` 修改。
+- `action:"reload"` —— **必须显式给 `targets`**（包名或路径）；留空返回 `targets-required`，`workspace` / `all` 这类「全部」关键词返回 `broad-target-rejected`。
+  作用域固定为当前会话工作区：范围外的目标只记进 `skipped`，不会被重载。
 
 作用域默认就是「模型所在的那个工作区」（`exec.agent.session.header.cwd`），所以「改了工作区里的插件源码 → 让模型自己重载」不需要它知道任何绝对路径。重载会丢目标插件的内存状态，工具说明里写明了这一点。
 

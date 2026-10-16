@@ -211,7 +211,7 @@ test('注册了 hot_reload 工具，默认作用域 = 会话工作区', async ()
   const definition = h.calls.tools[0]
   assert.equal(definition.name, 'hot_reload')
   const exec = { agent: { session: { header: { cwd: WS } } } }
-  const value = await definition.execute({ action: 'reload', dryRun: true }, exec)
+  const value = await definition.execute({ action: 'reload', targets: ['pkg-a'], dryRun: true }, exec)
   assert.equal(value.workspace, WS)
   assert.equal(value.action, 'reload')
   assert.equal(value.skipped.find((row) => row.pkg === 'pkg-a').reason, 'dry-run')

@@ -45,7 +45,7 @@ test('PARAMETERS / description 符合 DSH 方言与安全口径', () => {
   assert.equal(PARAMETERS.targets.type, 'array')
   assert.equal(PARAMETERS.targets.items.type, 'string')
   assert.equal(PARAMETERS.dryRun.type, 'boolean')
-  assert.equal(PARAMETERS.enabled.type, 'boolean')
+  assert.equal(PARAMETERS.enabled, undefined, 'LLM 对开关只读：不暴露 enabled 参数')
   assert.equal(PARAMETERS.all.type, 'boolean')
   for (const [key, spec] of Object.entries(PARAMETERS)) {
     if (spec.type === 'object') assert.ok(Object.hasOwn(spec, 'additionalProperties'), key + ' 缺 additionalProperties')
@@ -61,13 +61,15 @@ test('注册：defineTool 编译出合法 definition 并挂进 tools.register', 
   assert.equal(definition.parameters.type, 'object')
   assert.deepEqual(definition.parameters.properties.action.enum, ['list', 'reload', 'auto'])
   assert.equal(typeof definition.output.render, 'function')
+  // 权限：LLM 对开关只读 —— 连「写开关」的参数都不存在
+  assert.equal(definition.parameters.properties.enabled, undefined, '不应暴露 enabled 参数')
 })
 
-test('execute：默认 action=reload，选择器为空、工作区取自会话', async () => {
+test('execute：默认 action=reload 且必须显式 targets，工作区取自会话', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
-  const value = await definition.execute({}, exec)
-  assert.deepEqual(calls.reload, [{ selectors: [], workspace: WORKSPACE, dryRun: false }])
+  const value = await definition.execute({ targets: ['dsh-our-free-model'] }, exec)
+  assert.deepEqual(calls.reload, [{ selectors: ['dsh-our-free-model'], workspace: WORKSPACE, dryRun: false }])
   assert.equal(value.ok, true)
   assert.equal(value.action, 'reload')
   assert.equal(value.workspace, WORKSPACE)
@@ -84,6 +86,33 @@ test('渲染：只读模式输出开关状态（自动重载/自身/跨工作区
   assert.match(blocks[0].text, /自动重载：关/)
   assert.match(blocks[0].text, /自身自动重载：关/)
   assert.match(blocks[0].text, /跨工作区：关/)
+})
+
+test('权限：传 enabled 被拒绝（开关只读）且不写盘', async () => {
+  const { deps, calls } = stubDeps()
+  const { definition } = await register(deps)
+  const value = await definition.execute({ action: 'auto', enabled: true }, exec)
+  assert.equal(value.ok, false)
+  assert.equal(value.error, 'read-only')
+  assert.equal(calls.auto.length, 0, '不得写盘')
+})
+
+test('权限：reload 必须显式 targets（留空/空白 = targets-required）', async () => {
+  const { deps, calls } = stubDeps()
+  const { definition } = await register(deps)
+  assert.equal((await definition.execute({ action: 'reload' }, exec)).error, 'targets-required')
+  assert.equal((await definition.execute({ action: 'reload', targets: ['  '] }, exec)).error, 'targets-required')
+  assert.equal(calls.reload.length, 0, '没有显式目标时不得触发重载')
+})
+
+test('权限：不接受 workspace / all 这类「全部」语义', async () => {
+  const { deps, calls } = stubDeps()
+  const { definition } = await register(deps)
+  for (const keyword of ['workspace', 'ALL']) {
+    const value = await definition.execute({ targets: [keyword] }, exec)
+    assert.equal(value.error, 'broad-target-rejected')
+  }
+  assert.equal(calls.reload.length, 0)
 })
 
 test('execute：action=list 只列目标，不触发重载', async () => {
@@ -117,22 +146,24 @@ test('execute：action=auto 省略 enabled = 只读当前状态', async () => {
   assert.equal(calls.auto.length, 0, '只读不得写盘')
   assert.equal(calls.getAuto, 1, '只读应调用 getAuto 一次')
   assert.equal(calls.auto.length, 0)
+  // 写开关的请求被拒绝（权限：开关只读，写入口只留给用户）
   const written = await definition.execute({ action: 'auto', enabled: false }, exec)
-  assert.deepEqual(calls.auto, [{ enabled: false }])
-  assert.equal(written.ok, true)
+  assert.equal(written.ok, false)
+  assert.equal(written.error, 'read-only')
+  assert.equal(calls.auto.length, 0, '不得写盘')
 })
 
 test('execute：没有会话工作区时按 undefined 传下去（由上层回落 cwd）', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
-  await definition.execute({}, {})
+  await definition.execute({ targets: ['dsh-our-free-model'] }, {})
   assert.equal(calls.reload[0].workspace, undefined)
 })
 
 test('render：返回 [{ type: "text", text }] 内容块数组（宿主对其调 .some）', async () => {
   const { deps } = stubDeps()
   const { definition } = await register(deps)
-  const value = await definition.execute({}, exec)
+  const value = await definition.execute({ targets: ['dsh-our-free-model'] }, exec)
   const content = definition.output.render({}, value)
   assert.ok(Array.isArray(content), 'render 必须返回内容块数组，返回裸字符串会让宿主抛 content.some is not a function')
   assert.ok(content.length >= 1)
