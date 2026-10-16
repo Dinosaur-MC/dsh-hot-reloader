@@ -205,6 +205,16 @@ Reloads are logged to the host log; you can also check status at any time.
 | `POST` | `/dsh-hot-reloader/toggle` | In-memory flip only (not persisted) — for "pause for a moment" |
 | `POST` | `/dsh-hot-reloader/self-reload` | Reload this plugin itself (for developing it) |
 
+### GUI switch
+
+This plugin ships a **browser half** (`lib/client.js` + `dsh.client` in package.json) that puts a **Configure card** on its row of the Web Plugins page: the automatic-reload switch plus a status line (watched targets / files / reloads since start).
+
+- The switch writes through the platform's own settings form (`ctx.configForms` with a revision fence) — the same profile patch `POST /auto` writes;
+- The card registers into the `plugins.row.config` slot keyed `dsh-hot-reloader#dsh-hot-reloader`, so it does **not** depend on the "auto-generated settings page" renderer (some deployments' third-party UI bundles never render that);
+- The status line reads this plugin's `GET /dsh-hot-reloader`; when the host is down it says so.
+
+Changing `dsh.client` or the browser half needs a **DSH restart** (the client-plugin manifest loads at host boot). Host-half edits still hot-reload.
+
 ```bash
 # status
 curl http://127.0.0.1:19387/dsh-hot-reloader
