@@ -110,12 +110,15 @@ test('execute：没有会话工作区时按 undefined 传下去（由上层回�
   assert.equal(calls.reload[0].workspace, undefined)
 })
 
-test('render：把结果渲染成含包名与原因的文本', async () => {
+test('render：返回 [{ type: "text", text }] 内容块数组（宿主对其调 .some）', async () => {
   const { deps } = stubDeps()
   const { definition } = await register(deps)
   const value = await definition.execute({}, exec)
-  const text = definition.output.render({}, value)
-  assert.equal(typeof text, 'string')
+  const content = definition.output.render({}, value)
+  assert.ok(Array.isArray(content), 'render 必须返回内容块数组，返回裸字符串会让宿主抛 content.some is not a function')
+  assert.ok(content.length >= 1)
+  for (const block of content) assert.equal(block.type, 'text')
+  const text = content.map((block) => block.text).join('\n')
   assert.match(text, /dsh-our-free-model/)
   assert.match(text, /F:\\AgentGarden/)
 })
