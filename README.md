@@ -207,8 +207,8 @@ dsh plugin --profile <你的profile> add dsh-hot-reloader
 - 卡片**不依赖**「宿主自动生成设置页」的渲染器（本机这套第三方 UI 不渲染它），而是自己注册座位、自己渲染；
 - 状态行读的是本插件的 `GET /dsh-hot-reloader`；宿主没在跑时只显示「状态端点不可达」。
 - 卡片里有 **「手动重载指定插件」** 列表：`GET /dsh-hot-reloader/targets?all=1` 列出全部目标，每行一个「重载」按钮 → `POST /dsh-hot-reloader/reload {targets:[包名], workspace:该目标包根}`，行内回显「已重载 / 已跳过 / 重载失败: 原因」。
-- 标签与口径（`listTargets` 的字段）：`reloadable`＝默认作用域内可重载（工具/HTTP 默认口径）；`manualReloadable`＝**点名可重载**（已激活且非自身，与作用域无关），GUI 用它决定是否给按钮——所以「工作区外」的插件也能一键重载，点行即视为你点名授权（内部把该目标自己的包根当 workspace 传下去）。
-- 行内只出现本地化文案（可重载 / 工作区外 / 未激活 / 本插件自身），不显示 `outside-workspace`、`not-activated` 这类机器码。
+- 标签与口径（`listTargets` 的字段）：`reloadable`＝默认作用域内可重载（工具/HTTP 默认口径）；`manualReloadable`＝**点名可重载**（已激活且非自身，与作用域无关），GUI 用它决定是否给按钮——所以装在任意目录（含别的项目目录）的插件也能一键重载，点行即视为你点名授权（内部把该目标自己的包根当 workspace 传下去）。
+- **GUI 里不提「工作区」**：那是会话/宿主侧的概念（工具的默认作用域），在插件配置页显示「工作区外」只会让人困惑。界面只区分「可重载 / 未激活 / 本插件自身」，且只出现本地化文案，不显示 `outside-workspace`、`not-activated` 这类机器码（这些口径只出现在工具输出与 HTTP 响应里，供模型/脚本使用）。
 - **本插件不做页面刷新**：宿主状态里会报出 `lib/client.js` 的 mtime，磁盘上有新版本时卡片只给一句文字提示「重启 DSH 后生效」。
   > 2026-10-17 真机事故：早先版本在这个位置放了 `location.reload()` 按钮，点击会让 DSH 崩溃（桌面窗口的会话凭据由宿主开窗时注入，页面导航后窗口回到未授权状态）。现已移除，并有回归守卫：源码出现 `.reload(` / `location.href =` / `location.assign(` 即测试失败。
 

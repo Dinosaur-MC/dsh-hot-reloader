@@ -202,7 +202,7 @@ test('tagKeyOf：工作区外 / 未激活 / 可重载 三种标签', () => {
   const mod = loadClientHalf()
   const { tagKeyOf } = mod.__internals
   assert.equal(tagKeyOf({ inWorkspace: true, activated: true, reloadable: true }), 'tagReloadable')
-  assert.equal(tagKeyOf({ inWorkspace: false, activated: true, reloadable: false }), 'tagOutside')
+  assert.equal(tagKeyOf({ inWorkspace: false, activated: true, reloadable: false, manualReloadable: true }), 'tagReloadable', '不看工作区，只看能不能点名重载')
   assert.equal(tagKeyOf({ inWorkspace: true, activated: false, reloadable: false }), 'tagNotActivated')
 })
 
@@ -344,7 +344,7 @@ test('工作区外的行也给「重载」按钮；未激活的行只给本地�
   const buttons = findAll(tree, (node) => String(node.props?.className || '').includes('dshhr-button') && text(node) === 'reloadOne')
   assert.equal(buttons.length, 1, '工作区外那行要有按钮（点行＝点名授权）')
   const out = text(tree)
-  assert.match(out, /tagOutside/, '工作区外的行仍有标签')
+  assert.match(out, /tagReloadable/, '工作区外但已激活 ⇒ 就标「可重载」，不提工作区')
   assert.match(out, /reasonNotActivated/, '未激活的行给本地化说明')
   assert.doesNotMatch(out, /not-activated/, '不许把英文机器码写到界面上')
   assert.doesNotMatch(out, /outside-workspace/, '不许把英文机器码写到界面上')
