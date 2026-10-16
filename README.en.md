@@ -215,7 +215,9 @@ This plugin ships a **browser half** (`lib/client.js` + `dsh.client` in package.
 - The card does **not** depend on the "auto-generated settings page" renderer (some deployments' third-party UI bundles never render that) — it registers its own seat and renders itself;
 - The status line reads this plugin's `GET /dsh-hot-reloader`; when the host is down it says so.
 
-Changing `dsh.client` or the browser half needs a **DSH restart** (the client-plugin manifest loads at host boot). Host-half edits still hot-reload.
+Changing `dsh.client` needs a **DSH restart** (the client-plugin manifest loads at host boot). Host-half edits still hot-reload.
+
+> **`dsh.client.inject` is intentionally empty**: it lists **client plugin ids**; naming one a deployment does not provide makes the browser half wait forever and never apply (measured here: this third-party aggregate UI registers its 25 client plugin ids under `@linxin666/*`, so copying first-party `@deepseek-ai/dsh-client-*` ids keeps the card from ever appearing). Seats and services are used on demand inside `apply()`.
 
 ```bash
 # status

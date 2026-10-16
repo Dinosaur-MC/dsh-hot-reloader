@@ -207,7 +207,9 @@ dsh plugin --profile <你的profile> add dsh-hot-reloader
 - 卡片**不依赖**「宿主自动生成设置页」的渲染器（本机这套第三方 UI 不渲染它），而是自己注册座位、自己渲染；
 - 状态行读的是本插件的 `GET /dsh-hot-reloader`；宿主没在跑时只显示「状态端点不可达」。
 
-改了 `dsh.client` 或客户端半之后要**重启 DSH**（客户端插件清单在宿主启动时装载）；只改宿主半仍然免重启。
+改动 `dsh.client` 之后要**重启 DSH**（客户端插件清单在宿主启动时装载）；只改宿主半仍然免重启。
+
+> **`dsh.client.inject` 故意留空**：它列的是**客户端插件 id**，列了而该部署没有，浏览器半就会一直等依赖、**永不 apply**（本机实测：这套第三方聚合 UI 的 25 个 client 插件 id 全是 `@linxin666/*`，抄首方 `@deepseek-ai/dsh-client-*` 会让卡片永远不出现）。座位与服务在 `apply()` 里按需使用，不依赖它。
 
 ```bash
 # 看状态
