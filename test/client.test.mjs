@@ -42,7 +42,10 @@ function stubCtx(over = {}) {
   }
   const ctx = {
     effect: (fn) => fn(),
-    locale: { register: (ns, dicts) => { calls.locales.push({ ns, dicts }); return () => {} } },
+    locale: {
+      register: (ns, dicts) => { calls.locales.push({ ns, dicts }); return () => {} },
+      bind: (ns) => (key) => key,
+    },
     configForms: {
       get: (id) => { calls.get = id; if (over.getThrows) throw new Error('not served'); return scope },
       whileServed: (ids, cb) => { calls.whileServed = ids; return cb() },
@@ -55,15 +58,11 @@ function stubCtx(over = {}) {
   return { ctx, calls, snapshot }
 }
 
-/** 按平台的方式把卡片 Props 组起来：槽 inject 的门面 + 平台注入的 t / view / useRowForm。 */
-function cardProps(calls, view = 'page') {
-  const face = calls.registered[0].options.inject()
-  return {
-    ...face,
-    view,
-    t: (key) => key,
-    useRowForm: (select) => select(face.hooks.rowForm.getSnapshot()),
-  }
+const sectionOf = (calls) => calls.registered.find((row) => row.options.name === 'settings.section')
+const rowConfigOf = (calls) => calls.registered.find((row) => row.options.name === 'plugins.row.config')
+/** 按平台的方式把卡片 Props 组起来：槽 inject 的门面 + 平台注入的 t / view。 */
+function cardProps(entry, view = 'page') {
+  return { ...entry.options.inject(), view, t: (key) => key }
 }
 
 test('客户端半：导出 apply/inject，inject 只要三个服务', () => {
@@ -72,18 +71,23 @@ test('客户端半：导出 apply/inject，inject 只要三个服务', () => {
   assert.deepEqual(mod.inject, ['slots', 'locale', 'configForms'])
 })
 
-test('注册：行键是 <包名>#<行 id>，只挂在 plugins.row.config 槽上', () => {
+test('注册两个座位：settings.section（本部署真正渲染的）与 plugins.row.config', () => {
   const mod = loadClientHalf()
   const { ctx, calls } = stubCtx()
   mod.apply(ctx)
   assert.equal(calls.get, 'dsh-hot-reloader')
+  assert.equal(calls.registered.length, 2)
+  const section = sectionOf(calls)
+  assert.ok(section, '必须注册 settings.section —— 本部署不渲染 plugins.row.config')
+  assert.equal(section.options.id, 'hot-reloader')
+  assert.equal(typeof section.options.order, 'number')
+  assert.equal(section.options.locale, mod.NS)
+  assert.equal(typeof section.options.label, 'function')
+  assert.equal(section.options.label(), 'title')
+  assert.equal(typeof section.component, 'function')
+  const rowConfig = rowConfigOf(calls)
+  assert.equal(rowConfig.options.key, 'dsh-hot-reloader#dsh-hot-reloader')
   assert.deepEqual(calls.whileServed, ['dsh-hot-reloader'])
-  assert.equal(calls.registered.length, 1)
-  const { options, component } = calls.registered[0]
-  assert.equal(options.name, 'plugins.row.config')
-  assert.equal(options.key, 'dsh-hot-reloader#dsh-hot-reloader')
-  assert.equal(options.locale, mod.NS)
-  assert.equal(typeof component, 'function')
   assert.ok(calls.locales.some((row) => row.ns === mod.NS && row.dicts.zh && row.dicts.en), '应注册中英词典')
 })
 
@@ -91,14 +95,14 @@ test('摘要视图：插件页列表里那一行返回摘要文案', () => {
   const mod = loadClientHalf()
   const { ctx, calls } = stubCtx()
   mod.apply(ctx)
-  assert.equal(calls.registered[0].component(cardProps(calls, 'summary')), 'summary')
+  assert.equal(sectionOf(calls).component(cardProps(sectionOf(calls), 'summary')), 'summary')
 })
 
 test('卡片渲染：开关勾选态来自宿主快照，标签走词典', () => {
   const mod = loadClientHalf()
   const { ctx, calls } = stubCtx()
   mod.apply(ctx)
-  const tree = calls.registered[0].component(cardProps(calls))
+  const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
   const checkbox = tree.props.children[0].props.children[0]
   assert.equal(checkbox.type, 'Checkbox')
   assert.equal(checkbox.props.checked, true)
@@ -110,7 +114,7 @@ test('拨动开关：走平台的带 revision 栅栏写入（op=set path=[enable
   const mod = loadClientHalf()
   const { ctx, calls } = stubCtx()
   mod.apply(ctx)
-  await cardProps(calls).setEnabled(false)
+  await cardProps(sectionOf(calls)).setEnabled(false)
   assert.deepEqual(calls.mutate, [{ ops: [{ op: 'set', path: ['enabled'], value: false }], revision: 7 }])
 })
 
@@ -125,8 +129,18 @@ test('写入被宿主拒绝：卡片出现失败提示，不假装成功', async
   const mod = loadClientHalf()
   const { ctx, calls } = stubCtx({ mutateAccepts: false })
   mod.apply(ctx)
-  await cardProps(calls).setEnabled(false)
-  // React 桩把 key 留在 props 里（真 React 会把它抽走），断言读 props.key。
-  const keys = calls.registered[0].component(cardProps(calls)).props.children.map((child) => child.props.key)
+  await cardProps(sectionOf(calls)).setEnabled(false)
+  const keys = sectionOf(calls).component(cardProps(sectionOf(calls))).props.children.map((child) => child.props.key)
   assert.ok(keys.includes('failed'), '被拒绝时应有失败提示：' + JSON.stringify(keys))
+})
+
+test('卡片在拿不到 hooks 糖时也能渲染（自己订阅 store）', () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const face = sectionOf(calls).options.inject()
+  assert.equal(typeof face.snapshot, 'function')
+  assert.equal(typeof face.subscribe, 'function')
+  const tree = sectionOf(calls).component({ ...face, t: (key) => key })
+  assert.equal(tree.type, 'div')
 })

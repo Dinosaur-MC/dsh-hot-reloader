@@ -199,10 +199,12 @@ dsh plugin --profile <你的profile> add dsh-hot-reloader
 
 ### 图形界面开关
 
-本插件带**浏览器半**（`lib/client.js` + package.json 的 `dsh.client`），会在 Web 的「插件」页给本插件那一行挂一张 **Configure 卡片**：自动重载开关 + 状态行（监听目标数 / 文件数 / 重载次数）。
+本插件带**浏览器半**（`lib/client.js` + package.json 的 `dsh.client`），会在 **设置页**贡献一节「热重载器」：自动重载开关 + 状态行（监听目标数 / 文件数 / 重载次数）。
+
+> 座位说明：主入口是 `settings.section`（设置页的 section 座位，多数 UI 都渲染）；同时也注册首方的 `plugins.row.config`（插件行 Configure 页座位）——那一位在第三方聚合 UI（如 `@linxin666/dsh-web-all`）里**没有渲染者**，注册它不产生任何界面。
 
 - 开关直接走平台自己的设置表单（`ctx.configForms` + revision 栅栏），写的就是 profile patch，与 `POST /auto` 等价；
-- 卡片按 `plugins.row.config` 槽、键 `dsh-hot-reloader#dsh-hot-reloader` 注册，所以**不依赖**「宿主自动生成设置页」的渲染器（本机这套第三方 UI 不渲染它）；
+- 卡片**不依赖**「宿主自动生成设置页」的渲染器（本机这套第三方 UI 不渲染它），而是自己注册座位、自己渲染；
 - 状态行读的是本插件的 `GET /dsh-hot-reloader`；宿主没在跑时只显示「状态端点不可达」。
 
 改了 `dsh.client` 或客户端半之后要**重启 DSH**（客户端插件清单在宿主启动时装载）；只改宿主半仍然免重启。
