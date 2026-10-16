@@ -198,9 +198,11 @@ Reloads are logged to the host log; you can also check status at any time.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/dsh-hot-reloader` | Full status: which packages are watched, files scanned, scan/reload/failure counters, recent logs |
-| `POST` | `/dsh-hot-reloader/reload` | Manual reload. Empty body = all; accepts `["pkg-name"]` or `{"packages":["pkg-name"]}` |
-| `POST` | `/dsh-hot-reloader/toggle` | Pause / resume automatic reloading |
+| `GET` | `/dsh-hot-reloader` | Full status: where the switch comes from, which packages are watched, scan/reload/failure counters, recent logs |
+| `GET` | `/dsh-hot-reloader/targets?workspace=<path>` | List watched targets: package name, package root, whether it is inside the given workspace |
+| `POST` | `/dsh-hot-reloader/reload` | Manual reload. Empty = everything inside the workspace; accepts `["pkg-name"]`, `["path"]`, `{"targets":[...],"workspace":"...","dryRun":true}` or legacy `{"packages":[...]}` |
+| `POST` | `/dsh-hot-reloader/auto` | **Persistent** auto-reload switch (written into the profile patch): `{"enabled":true\|false\|null}`; `null` restores the default |
+| `POST` | `/dsh-hot-reloader/toggle` | In-memory flip only (not persisted) — for "pause for a moment" |
 | `POST` | `/dsh-hot-reloader/self-reload` | Reload this plugin itself (for developing it) |
 
 ```bash
@@ -215,9 +217,47 @@ curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload \
 # reload everything once
 curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload
 
-# temporarily disable automatic reloading (e.g. mid-refactor, so every save doesn't trigger)
+# temporarily disable automatic reloading (in memory only; a restart restores it)
 curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/toggle
+
+# persistently disable automatic reloading (writes into the profile patch)
+curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/auto \
+     -H 'content-type: application/json' -d '{"enabled":false}'
 ```
+
+### Targeted reload: three ways to name what you mean
+
+Elements of `targets` in `POST /reload`:
+
+| Form | Example | Meaning |
+|---|---|---|
+| keyword | `workspace` / `all` | everything inside the workspace / every watched target (`all` is still bounded by `allowForeignTargets`) |
+| package name | `dsh-onebot-qq`, `dsh-onebot-qq/settings-remote` | that package (including sibling entries under the same package root) |
+| path | `projects/x/lib/split.js` or absolute | any package overlapping that path (file or directory; relative paths resolve against the given workspace) |
+
+```bash
+# reload only the package that owns the files you just edited
+curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload \
+     -H 'content-type: application/json' \
+     -d '{"targets":["D:/ws/projects/x/lib/split.js"],"workspace":"D:/ws"}'
+
+# plan only: see what would match and what the guardrails refuse
+curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload \
+     -H 'content-type: application/json' -d '{"targets":["all"],"dryRun":true}'
+```
+
+Three default refusals show up in the response as `skipped` (never as silent success): `outside-workspace` (set `allowForeignTargets: true` to cross workspaces), `self` (bootstrap goes through `/self-reload`), and `no-match` for selectors that hit nothing.
+
+### Letting the model trigger it: the `hot_reload` tool
+
+Once installed, agents in the host gain a `hot_reload` tool:
+
+- `action:"list"` — see which targets exist and which are outside the workspace;
+- `action:"reload"` (default) — an empty `targets` means **every plugin inside the current session workspace**;
+- `dryRun:true` — report the match set without reloading;
+- `action:"auto"` + `enabled` — flip the persistent switch.
+
+The default scope is literally "the workspace this agent is in" (`exec.agent.session.header.cwd`), so "I edited a plugin in my workspace, now reload it" needs no absolute paths from the model. The tool description states that a reload drops the target plugin's in-memory state.
 
 `GET /dsh-hot-reloader` returns roughly:
 
@@ -249,7 +289,9 @@ Override the row in your profile's `cordis.patch.yml`:
 ```yaml
 - id: dsh-hot-reloader
   config:
-    intervalMs: 1000      # polling interval (ms)
+    enabled: true         # master switch for automatic reload (also togglable in Settings → Plugins)
+    intervalMs: 1000      # polling interval (ms); changing it needs the host to remount this plugin
+    allowForeignTargets: false  # allow manual/tool reloads of plugins whose root is outside the given workspace
     debounceMs: 400       # settle time after a change is detected (ms)
     reloadSelf: false     # also auto-reload this plugin itself
     only: []              # watch only these package names (empty = all)
