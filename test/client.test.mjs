@@ -175,3 +175,26 @@ test('注册的是兜底组件：渲染抛错时输出可见的错误文字，�
   assert.match(text, /card error/)
   assert.match(text, /boom/)
 })
+test('词典只放字符串（放函数/数字会让平台的 t() 在 template.replace 上抛错）', () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const dicts = calls.locales[0].dicts
+  for (const lang of ['zh', 'en']) {
+    for (const [key, value] of Object.entries(dicts[lang])) {
+      assert.equal(typeof value, 'string', `${lang}.${key} 必须是字符串，实为 ${typeof value}`)
+    }
+  }
+})
+
+test('t() 抛错时卡片照样渲染（退回 key，不整页炸）', () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const entry = sectionOf(calls)
+  const face = entry.options.inject()
+  const throwing = { ...face, t: () => { throw new Error('template.replace is not a function') } }
+  const tree = entry.component(throwing)
+  assert.equal(tree.type, 'div')
+  assert.match(JSON.stringify(tree), /autoReload/)
+})
