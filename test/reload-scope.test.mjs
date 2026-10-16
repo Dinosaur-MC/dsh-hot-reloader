@@ -113,7 +113,9 @@ test('/targets：列出两个目标并标出工作区归属', async () => {
 test('/reload：旧 body 形态（["包名"]）仍然按包名定位', async () => {
   const h = await harness()
   const { json } = await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: '["pkg-a"]' })
-  assert.equal(json.ok, true)
+  // 命中但一个都没真重载 ⇒ 不许报 ok:true（评审 I4 的回归点）
+  assert.equal(json.ok, false)
+  assert.match(json.note, /没有实际重载/)
   assert.equal(json.workspace, process.cwd())
   // fixture 的 entry 没有 fiber ⇒ reloadTarget 明确跳过（不是静默成功）
   assert.equal(json.skipped[0].pkg, 'pkg-a')
@@ -224,7 +226,8 @@ test('暴露 hotReloader 服务（其它插件可手动触发）', async () => {
   assert.equal(typeof provided.value.reload, 'function')
   assert.equal(typeof provided.value.list, 'function')
   assert.equal(typeof provided.value.setAuto, 'function')
-  assert.equal(provided.value.config.enabled, true)
+  assert.equal(typeof provided.value.config, 'function', 'config 应是 live 取值，不是 apply 期快照')
+  assert.equal(provided.value.config().enabled, true)
 })
 test('/targets：默认只列可重载的，工作区外与未激活的进 hidden 汇总', async () => {
   const h = await harness({ fiber: true })

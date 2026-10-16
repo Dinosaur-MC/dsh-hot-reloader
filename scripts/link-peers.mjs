@@ -47,7 +47,16 @@ for (const peer of PEERS) {
     continue;
   }
   const link = path.join(target, peer);
-  fs.rmSync(link, { recursive: true, force: true });
+  // 摘掉旧链接：Node ≥24 的 fs.rmSync(link, {recursive:true}) 会**穿越 junction 删掉目标目录的内容**
+  // （本机实测：Node 24.18.1 会清空目标，Node 22 不会）—— 而目标正是系统里真实安装的 @deepseek-ai/dsh 包，
+  // 所以链接一律用 unlinkSync 摘除，只有真目录才递归删。
+  try {
+    const existing = fs.lstatSync(link);
+    if (existing.isSymbolicLink()) fs.unlinkSync(link);
+    else fs.rmSync(link, { recursive: true, force: true });
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
   fs.symlinkSync(source, link, 'junction');
   console.log(`linked ${peer} -> ${source}`);
   linked += 1;

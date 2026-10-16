@@ -206,7 +206,9 @@ dsh plugin --profile <你的profile> add dsh-hot-reloader
 - 开关直接走平台自己的设置表单（`ctx.configForms` + revision 栅栏），写的就是 profile patch，与 `POST /auto` 等价；
 - 卡片**不依赖**「宿主自动生成设置页」的渲染器（本机这套第三方 UI 不渲染它），而是自己注册座位、自己渲染；
 - 状态行读的是本插件的 `GET /dsh-hot-reloader`；宿主没在跑时只显示「状态端点不可达」。
-- 卡片自带 **「重新加载界面」** 按钮（DSH 桌面版没有 F5）：宿主状态里会报出 `lib/client.js` 的 mtime，若磁盘上已是新版本，卡片额外提示「磁盘上有更新的浏览器半」。
+- 卡片里有 **「手动重载指定插件」** 列表：`GET /dsh-hot-reloader/targets?all=1` 列出全部目标（带「工作区外 / 未激活」标签），每行一个「重载」按钮 → `POST /dsh-hot-reloader/reload {targets:[包名], workspace:该目标包根}`，行内回显「已重载 / 已跳过 / 重载失败: 原因」。显式带包根＝用户点名授权，所以 npm 装进 profile 的插件也能重载。
+- **本插件不做页面刷新**：宿主状态里会报出 `lib/client.js` 的 mtime，磁盘上有新版本时卡片只给一句文字提示「重启 DSH 后生效」。
+  > 2026-10-17 真机事故：早先版本在这个位置放了 `location.reload()` 按钮，点击会让 DSH 崩溃（桌面窗口的会话凭据由宿主开窗时注入，页面导航后窗口回到未授权状态）。现已移除，并有回归守卫：源码出现 `.reload(` / `location.href =` / `location.assign(` 即测试失败。
 
 改动 `dsh.client` 之后要**重启 DSH**（客户端插件清单在宿主启动时装载）；只改宿主半仍然免重启。
 
