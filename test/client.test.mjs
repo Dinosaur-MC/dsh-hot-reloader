@@ -355,5 +355,7 @@ test('列表行结构：内容列 + 操作列，显示短路径、完整路径�
   const rootNode = byClass(tree, 'dshhr-root')[0]
   assert.equal(rootNode.props.title, root, '完整路径进 title')
   assert.match(text(rootNode), /^…/, '显示的是短路径')
-  assert.equal(byClass(tree, 'dshhr-button').length, 1, '操作列里是重载按钮')
+  const actionColumn = byClass(tree, 'dshhr-item-action')[0]
+  const actionButtons = findAll(actionColumn, (node) => String(node.props?.className || '').includes('dshhr-button'))
+  assert.equal(actionButtons.length, 1, '操作列里是重载按钮')
 })
