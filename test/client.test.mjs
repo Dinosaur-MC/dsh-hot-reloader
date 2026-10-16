@@ -198,3 +198,45 @@ test('t() 抛错时卡片照样渲染（退回 key，不整页炸）', () => {
   assert.equal(tree.type, 'div')
   assert.match(JSON.stringify(tree), /autoReload/)
 })
+test('isClientStale：只有两次 mtime 都是数字且不同才算过期', () => {
+  const mod = loadClientHalf()
+  const { isClientStale } = mod.__internals
+  assert.equal(isClientStale(null, 100), false, '宿主还没报 mtime 时不算过期')
+  assert.equal(isClientStale(100, null), false, '自己没记下 mtime 时不算过期')
+  assert.equal(isClientStale(100, 100), false)
+  assert.equal(isClientStale(100, 200), true, '磁盘上是新版本 ⇒ 该提示并给刷新按钮')
+})
+
+test('reloadInterface：调用 window.location.reload（没有 window 也不抛）', () => {
+  const mod = loadClientHalf()
+  let called = 0
+  globalThis.window = { location: { reload() { called += 1 } } }
+  try {
+    mod.__internals.reloadInterface()
+  } finally {
+    delete globalThis.window
+  }
+  assert.equal(called, 1)
+  assert.doesNotThrow(() => mod.__internals.reloadInterface())
+})
+
+test('卡片带「重新加载界面」按钮（状态行里）', () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const entry = sectionOf(calls)
+  const face = entry.options.inject()
+  // 伪造一个有状态的卡片：直接调用组件并注入 status（effects 在桩里不跑，所以这里用 hook 桩返回固定值）
+  const React2 = React
+  const originalUseState = React2.useState
+  const seq = [face.snapshot(), { watch: [1, 2], scannedFiles: 10, reloads: 3 }, false, 111]
+  React2.useState = (initial) => [seq.shift() ?? (typeof initial === 'function' ? initial() : initial), () => {}]
+  try {
+    const tree = entry.component({ ...face, t: (key) => key })
+    const text = JSON.stringify(tree)
+    assert.match(text, /reloadUi/, '状态行里应有重新加载按钮')
+    assert.match(text, /statusWatching/)
+  } finally {
+    React2.useState = originalUseState
+  }
+})

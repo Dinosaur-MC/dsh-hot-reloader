@@ -206,6 +206,7 @@ dsh plugin --profile <你的profile> add dsh-hot-reloader
 - 开关直接走平台自己的设置表单（`ctx.configForms` + revision 栅栏），写的就是 profile patch，与 `POST /auto` 等价；
 - 卡片**不依赖**「宿主自动生成设置页」的渲染器（本机这套第三方 UI 不渲染它），而是自己注册座位、自己渲染；
 - 状态行读的是本插件的 `GET /dsh-hot-reloader`；宿主没在跑时只显示「状态端点不可达」。
+- 卡片自带 **「重新加载界面」** 按钮（DSH 桌面版没有 F5）：宿主状态里会报出 `lib/client.js` 的 mtime，若磁盘上已是新版本，卡片额外提示「磁盘上有更新的浏览器半」。
 
 改动 `dsh.client` 之后要**重启 DSH**（客户端插件清单在宿主启动时装载）；只改宿主半仍然免重启。
 

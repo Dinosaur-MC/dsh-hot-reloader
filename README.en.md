@@ -214,6 +214,7 @@ This plugin ships a **browser half** (`lib/client.js` + `dsh.client` in package.
 - The switch writes through the platform's own settings form (`ctx.configForms` with a revision fence) — the same profile patch `POST /auto` writes;
 - The card does **not** depend on the "auto-generated settings page" renderer (some deployments' third-party UI bundles never render that) — it registers its own seat and renders itself;
 - The status line reads this plugin's `GET /dsh-hot-reloader`; when the host is down it says so.
+- The card carries a **“Reload interface”** button (the desktop app has no F5): the host reports `lib/client.js`'s mtime, so when a newer browser half is on disk the card says so explicitly.
 
 Changing `dsh.client` needs a **DSH restart** (the client-plugin manifest loads at host boot). Host-half edits still hot-reload.
 
