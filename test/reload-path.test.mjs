@@ -105,6 +105,18 @@ async function harness({ importThrows = false, deleteThrows = false, config = {}
   return { mod, calls, cache, url, fakeApply, call, previousFiber }
 }
 
+test('/targets?all=1：工作区外的目标 reloadable=false 但 manualReloadable=true（GUI 点行即授权）', async () => {
+  const h = await harness()
+  const other = path.join(HERE, 'fixtures', 'outside')
+  const { json } = await h.call({ url: '/dsh-hot-reloader/targets?all=1&workspace=' + encodeURIComponent(other) })
+  const row = json.targets.find((item) => item.pkg === 'pkg-a')
+  assert.ok(row, 'pkg-a 应在 all 列表里')
+  assert.equal(row.inWorkspace, false)
+  assert.equal(row.reloadable, false, '默认作用域内不可重载')
+  assert.equal(row.manualReloadable, true, '已激活且非自身 ⇒ 点名可重载')
+  assert.equal(row.blockedBy, 'outside-workspace')
+})
+
 test('真重载路径：清缓存 → 重新 import → registry.delete → 重建 fiber', async () => {
   const h = await harness()
   const { json } = await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: JSON.stringify({ targets: ['pkg-a'], workspace: WS }) })

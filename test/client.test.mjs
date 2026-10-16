@@ -329,6 +329,28 @@ test('可访问性：勾选框关联提示；写入被拒时失败行是 role=al
   assert.equal(text(alerts[0]), 'saveFailed')
 })
 
+test('工作区外的行也给「重载」按钮；未激活的行只给本地化说明（不再显示英文机器码）', () => {
+  const BS = String.fromCharCode(92)
+  const mod = loadClientHalf({ seq: [undefined, null, false, null, {
+    failed: false,
+    rows: [
+      { pkg: 'pkg-out', root: ['C:', 'other', 'pkg-out'].join(BS), inWorkspace: false, activated: true, reloadable: false, manualReloadable: true, blockedBy: 'outside-workspace' },
+      { pkg: 'pkg-off', root: ['C:', 'other', 'pkg-off'].join(BS), inWorkspace: false, activated: false, reloadable: false, manualReloadable: false, blockedBy: 'not-activated' },
+    ],
+  }, null, null] })
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
+  const buttons = findAll(tree, (node) => String(node.props?.className || '').includes('dshhr-button') && text(node) === 'reloadOne')
+  assert.equal(buttons.length, 1, '工作区外那行要有按钮（点行＝点名授权）')
+  const out = text(tree)
+  assert.match(out, /tagOutside/, '工作区外的行仍有标签')
+  assert.match(out, /reasonNotActivated/, '未激活的行给本地化说明')
+  assert.doesNotMatch(out, /not-activated/, '不许把英文机器码写到界面上')
+  assert.doesNotMatch(out, /outside-workspace/, '不许把英文机器码写到界面上')
+  assert.match(out, /tagsHint/, '列表下方要有标签说明')
+})
+
 test('shortPath：长路径只留末两段，短路径原样（列表不再糊成一片）', () => {
   const mod = loadClientHalf()
   const { shortPath } = mod.__internals
