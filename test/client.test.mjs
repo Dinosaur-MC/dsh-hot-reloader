@@ -351,33 +351,43 @@ test('工作区外的行也给「重载」按钮；未激活的行只给本地�
   assert.match(out, /tagsHint/, '列表下方要有标签说明')
 })
 
-test('shortPath：长路径只留末两段，短路径原样（列表不再糊成一片）', () => {
-  const mod = loadClientHalf()
-  const { shortPath } = mod.__internals
+test('插件页不出现任何目录/作用域信息（工作区只是 LLM 工具的门限）', () => {
   const BS = String.fromCharCode(92)
-  assert.equal(shortPath(['C:', 'Users', 'Dinos', '.dsh', 'profiles', 'desktop', 'node_modules', 'pkg-a'].join(BS)), `…${BS}node_modules${BS}pkg-a`)
-  assert.equal(shortPath(['F:', 'ws', 'pkg-a'].join(BS)), ['F:', 'ws', 'pkg-a'].join(BS))
-  assert.equal(shortPath(''), '')
-  assert.equal(shortPath(null), '')
-  assert.equal(shortPath('/home/u/plugins/plug'), '…/plugins/plug')
-})
-
-test('列表行结构：内容列 + 操作列，显示短路径、完整路径进 title', () => {
-  const BS = String.fromCharCode(92)
-  const root = ['C:', 'Users', 'Dinos', '.dsh', 'profiles', 'desktop', 'node_modules', 'pkg-b'].join(BS)
   const mod = loadClientHalf({ seq: [undefined, null, false, null, {
     failed: false,
-    rows: [{ pkg: 'pkg-b', root, inWorkspace: false, activated: true, reloadable: true }],
+    rows: [
+      { pkg: 'pkg-a', root: ['F:', 'ws', 'pkg-a'].join(BS), inWorkspace: true, activated: true, reloadable: true, manualReloadable: true },
+      { pkg: 'pkg-out', root: ['I:', 'Project', 'pkg-out'].join(BS), inWorkspace: false, activated: true, reloadable: false, manualReloadable: true, blockedBy: 'outside-workspace' },
+      { pkg: 'pkg-off', root: ['I:', 'Project', 'pkg-off'].join(BS), inWorkspace: false, activated: false, reloadable: false, manualReloadable: false, blockedBy: 'outside-workspace' },
+    ],
   }, null, null] })
   const { ctx, calls } = stubCtx()
   mod.apply(ctx)
-  const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
-  assert.equal(byClass(tree, 'dshhr-item-main').length, 1)
-  assert.equal(byClass(tree, 'dshhr-item-action').length, 1)
-  const rootNode = byClass(tree, 'dshhr-root')[0]
-  assert.equal(rootNode.props.title, root, '完整路径进 title')
-  assert.match(text(rootNode), /^…/, '显示的是短路径')
-  const actionColumn = byClass(tree, 'dshhr-item-action')[0]
-  const actionButtons = findAll(actionColumn, (node) => String(node.props?.className || '').includes('dshhr-button'))
-  assert.equal(actionButtons.length, 1, '操作列里是重载按钮')
+  const entry = sectionOf(calls)
+  // 用真实词典渲染（不是 key），这样「界面上到底写了什么」才真的被断言到
+  const dict = calls.locales[0].dicts.zh
+  const tt = (key, params) => {
+    const value = dict[key]
+    if (typeof value !== 'string') return key
+    return params === undefined ? value : value.replace(/\{(\w+)\}/g, (m, name) => String(params[name]))
+  }
+  const tree = entry.component({ ...entry.options.inject(), t: tt })
+  const out = text(tree)
+  assert.doesNotMatch(out, /工作区/)
+  assert.doesNotMatch(out, /node_modules/)
+  assert.ok(!out.includes(BS), '插件页不该出现目录路径')
+  assert.doesNotMatch(out, /outside-workspace|not-activated/)
+  const buttons = findAll(tree, (node) => String(node.props?.className || '').includes('dshhr-button') && text(node) === dict.reloadOne)
+  assert.equal(buttons.length, 2, '已激活的行都给按钮（含不在当前项目目录里的那个）')
+  assert.match(out, new RegExp(dict.reasonNotActivated.slice(0, 6)), '未激活的行给本地化说明')
 })
+
+test('词典本身不许出现「工作区 / workspace」（那是工具的门限，不是用户文案）', () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const { zh, en } = calls.locales[0].dicts
+  for (const [key, value] of Object.entries(zh)) assert.doesNotMatch(value, /工作区/, 'zh.' + key)
+  for (const [key, value] of Object.entries(en)) assert.doesNotMatch(value, /workspace/i, 'en.' + key)
+})
+
