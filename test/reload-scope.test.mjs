@@ -7,7 +7,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FIX = path.join(HERE, 'fixtures')
 const WS = path.join(FIX, 'ws')
 const SELF = path.join(HERE, '..')
-const PKG_A = path.join(WS, 'node_modules', 'pkg-a')
+const PKG_A = path.join(WS, 'pkg-a')
 const PKG_B = path.join(FIX, 'outside', 'pkg-b')
 const entryUrl = (pkg) => pathToFileURL(path.join(pkg, 'lib', 'index.js')).href
 

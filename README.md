@@ -190,9 +190,11 @@ dsh plugin --profile <你的profile> add dsh-hot-reloader
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/dsh-hot-reloader` | 完整状态：监听了哪些包、扫了多少文件、扫描/重载/失败计数、近期日志 |
-| `POST` | `/dsh-hot-reloader/reload` | 手动重载。body 留空 = 全部；支持 `["包名"]` 或 `{"packages":["包名"]}` |
-| `POST` | `/dsh-hot-reloader/toggle` | 暂停 / 恢复自动重载 |
+| `GET` | `/dsh-hot-reloader` | 完整状态：开关来源、监听了哪些包、扫描 / 重载 / 失败计数、近期日志 |
+| `GET` | `/dsh-hot-reloader/targets?workspace=<路径>` | 列出被监听目标：包名、包根、是否落在给定工作区内 |
+| `POST` | `/dsh-hot-reloader/reload` | 手动重载。留空 = 工作区内全部；支持 `["包名"]`、`["路径"]`、`{"targets":[...],"workspace":"...","dryRun":true}` 或旧式 `{"packages":[...]}` |
+| `POST` | `/dsh-hot-reloader/auto` | **持久**开关自动重载（写进 profile patch）：`{"enabled":true\|false\|null}`，`null` = 恢复默认 |
+| `POST` | `/dsh-hot-reloader/toggle` | 仅内存翻转（不落盘），用于「先临时停一下」 |
 | `POST` | `/dsh-hot-reloader/self-reload` | 重载本插件自身（开发这个插件时用） |
 
 ```bash
@@ -207,9 +209,47 @@ curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload \
 # 全部重载一次
 curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload
 
-# 临时关掉自动重载（例如你正在做大面积重构，不想每存一次就重载一次）
+# 临时关掉自动重载（仅本次运行有效，重启即恢复）
 curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/toggle
+
+# 持久关掉自动重载（写进 profile patch，等价于在宿主设置页里关掉 enabled）
+curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/auto \
+     -H 'content-type: application/json' -d '{"enabled":false}'
 ```
+
+### 定向重载：三种指定方式
+
+`POST /reload` 的 `targets` 元素可以是：
+
+| 形态 | 例子 | 语义 |
+|---|---|---|
+| 关键词 | `workspace` / `all` | 工作区内的全部 / 全部被监听目标（`all` 仍受 `allowForeignTargets` 约束） |
+| 包名 | `dsh-onebot-qq`、`dsh-onebot-qq/settings-remote` | 命中该包（含挂在同一包根下的子入口） |
+| 路径 | `projects/x/lib/split.js` 或绝对路径 | 与该路径有交集的包（文件、目录都行；相对路径按给定工作区解析） |
+
+```bash
+# 只重载「我刚改的那几个文件」所在的包
+curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload \
+     -H 'content-type: application/json' \
+     -d '{"targets":["D:/ws/projects/x/lib/split.js"],"workspace":"D:/ws"}'
+
+# 只算不重载：先看清会命中谁、谁会被护栏拦下
+curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload \
+     -H 'content-type: application/json' -d '{"targets":["all"],"dryRun":true}'
+```
+
+三项默认拒绝（都会出现在响应的 `skipped` 里，不会静默当成功）：区外目标 `outside-workspace`（要跨区请把 `allowForeignTargets` 设为 `true`）、本插件自身 `self`（自举走 `/self-reload`）、没命中的选择器 `no-match`。
+
+### 让模型自己触发：`hot_reload` 工具
+
+装好之后，宿主里的 Agent 会多一个 `hot_reload` 工具：
+
+- `action:"list"` —— 先看清楚有哪些可重载目标、哪些在工作区外；
+- `action:"reload"`（默认）—— `targets` 留空 = **当前会话工作区内的全部插件**；
+- `dryRun:true` —— 只回报命中集合，不真的重载；
+- `action:"auto"` + `enabled` —— 切换持久开关。
+
+作用域默认就是「模型所在的那个工作区」（`exec.agent.session.header.cwd`），所以「改了工作区里的插件源码 → 让模型自己重载」不需要它知道任何绝对路径。重载会丢目标插件的内存状态，工具说明里写明了这一点。
 
 `GET /dsh-hot-reloader` 的返回大致长这样：
 
@@ -241,7 +281,9 @@ curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/toggle
 ```yaml
 - id: dsh-hot-reloader
   config:
-    intervalMs: 1000      # 轮询间隔（毫秒）
+    enabled: true         # 自动重载总开关（也可在宿主「设置 → 插件」里直接切换）
+    intervalMs: 1000      # 轮询间隔（毫秒）；改动需宿主重挂本插件才生效
+    allowForeignTargets: false  # 是否允许手动/工具重载「包根不在给定工作区内」的插件
     debounceMs: 400       # 检测到变更后，等写入稳定的时间（毫秒）
     reloadSelf: false     # 是否连同本插件自己一起自动重载
     only: []              # 只监听这些包名（留空 = 全部）
