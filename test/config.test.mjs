@@ -62,7 +62,7 @@ test('Config：已导出且只把选定的字段标为 volatile', () => {
   assert.equal(dict.quiet?.meta?.volatile, true)
   assert.equal(dict.allowForeignTargets?.meta?.volatile, true)
   assert.notEqual(dict.intervalMs?.meta?.volatile, true, 'intervalMs 在注册定时器时读取，不应标 volatile')
-  assert.notEqual(dict.reloadSelf?.meta?.volatile, true)
+  assert.equal(dict.reloadSelf?.meta?.volatile, true, 'reloadSelf 每轮扫描都重读 ⇒ 标 volatile，GUI 开关才写得进去')
 })
 
 test('Config：schema 覆盖全部 DEFAULTS 键（否则被 cordis 裁掉）', () => {

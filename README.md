@@ -199,7 +199,7 @@ dsh plugin --profile <你的profile> add dsh-hot-reloader
 
 ### 图形界面开关
 
-本插件带**浏览器半**（`lib/client.js` + package.json 的 `dsh.client`），会在 **设置页**贡献一节「热重载器」：自动重载开关 + 状态行（监听目标数 / 文件数 / 重载次数）。
+本插件带**浏览器半**（`lib/client.js` + package.json 的 `dsh.client`），会在 **设置页**贡献一节「热重载器」：**两个开关**（自动热重载 / 自动重载本插件自身）+ 状态行（监听目标数 / 文件数 / 重载次数）+ 手动重载指定插件的列表。
 
 > 座位说明：主入口是 `settings.section`（设置页的 section 座位，多数 UI 都渲染）；同时也注册首方的 `plugins.row.config`（插件行 Configure 页座位）——那一位在第三方聚合 UI（如 `@linxin666/dsh-web-all`）里**没有渲染者**，注册它不产生任何界面。
 
@@ -304,7 +304,7 @@ curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload \
     intervalMs: 1000      # 轮询间隔（毫秒）；改动需宿主重挂本插件才生效
     allowForeignTargets: false  # 是否允许手动/工具重载「包根不在给定工作区内」的插件
     debounceMs: 400       # 检测到变更后，等写入稳定的时间（毫秒）
-    reloadSelf: false     # 是否连同本插件自己一起自动重载
+    reloadSelf: false     # 是否连同本插件自己一起自动重载（设置页有开关；只在 enabled 打开时生效）
     only: []              # 只监听这些包名（留空 = 全部）
     except: []            # 跳过这些包名
     extraRoots: []        # 额外监听的绝对路径（不在 loader 树里的目录）
@@ -418,6 +418,7 @@ class LoadCache extends SafeMap {
 ### 自举问题
 
 本插件默认不自动重载自己（`reloadSelf: false`）——改自己的监听逻辑会让自举行为变得难以预测。
+现在这是设置页里的**第二个开关**（`reloadSelf` 已标 volatile，改完下一轮扫描即生效）：开着它改本插件代码会自动生效，代价是保存到一半可能被重载、自升级失败时需要重启 DSH 恢复。
 
 但这里有个「先有鸡还是先有蛋」的真实问题：**当插件 entry 被重新激活时，宿主的 `loader.import(specifier)` 会命中模块缓存、拿回旧代码**——正是本插件要解决的那个问题本身。
 

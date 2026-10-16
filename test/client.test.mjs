@@ -39,7 +39,7 @@ function stubCtx(over = {}) {
     status: over.status ?? 'ready',
     writable: over.writable ?? true,
     revision: 7,
-    value: { enabled: over.enabled ?? true },
+    value: { enabled: over.enabled ?? true, reloadSelf: over.reloadSelf === true },
     base: {},
     user: {},
   }
@@ -207,6 +207,22 @@ test('tagKeyOf：工作区外 / 未激活 / 可重载 三种标签', () => {
   assert.equal(tagKeyOf({ pkg: 'dsh-hot-reloader', activated: true }), 'tagSelf')
 })
 
+test('reloadSelf 开关：勾选态来自快照，拨动写入 path=[reloadSelf]', async () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx({ reloadSelf: true })
+  mod.apply(ctx)
+  const entry = sectionOf(calls)
+  const face = entry.options.inject()
+  const tree = entry.component({ ...face, t: (key) => key })
+  const boxes = byClass(tree, 'dshhr-checkbox')
+  assert.equal(boxes.length, 2, '两个开关：自动热重载 / 自动重载本插件自身')
+  assert.equal(boxes[0].props.label, 'autoReload')
+  assert.equal(boxes[1].props.label, 'autoReloadSelf')
+  assert.equal(boxes[1].props.checked, true, '勾选态来自快照里的 reloadSelf')
+  await face.setReloadSelf(false)
+  assert.deepEqual(calls.mutate, [{ ops: [{ op: 'set', path: ['reloadSelf'], value: false }], revision: 7 }])
+})
+
 test('回归：旧宿主不报 manualReloadable 时，运行中的插件仍要有「重载」按钮', () => {
   const BS = String.fromCharCode(92)
   const mod = loadClientHalf({ seq: [undefined, null, false, null, {
@@ -283,7 +299,7 @@ test('拿不到首方 primitives 时回落到纯 DOM input（卡片仍可渲染�
   mod.apply(ctx)
   const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
   const boxes = byClass(tree, 'dshhr-checkbox')
-  assert.equal(boxes.length, 1)
+  assert.equal(boxes.length, 2, '两个开关都回落成原生 input')
   assert.equal(boxes[0].type, 'input')
   assert.equal(boxes[0].props.checked, true)
 })
