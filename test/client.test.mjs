@@ -204,6 +204,30 @@ test('tagKeyOf：工作区外 / 未激活 / 可重载 三种标签', () => {
   assert.equal(tagKeyOf({ inWorkspace: true, activated: true, reloadable: true }), 'tagReloadable')
   assert.equal(tagKeyOf({ inWorkspace: false, activated: true, reloadable: false, manualReloadable: true }), 'tagReloadable', '不看工作区，只看能不能点名重载')
   assert.equal(tagKeyOf({ inWorkspace: true, activated: false, reloadable: false }), 'tagNotActivated')
+  assert.equal(tagKeyOf({ pkg: 'dsh-hot-reloader', activated: true }), 'tagSelf')
+})
+
+test('回归：旧宿主不报 manualReloadable 时，运行中的插件仍要有「重载」按钮', () => {
+  const BS = String.fromCharCode(92)
+  const mod = loadClientHalf({ seq: [undefined, null, false, null, {
+    failed: false,
+    rows: [
+      { pkg: 'dsh-win-multi-bash', root: ['C:', 'dev', 'dsh-win-multi-bash'].join(BS), inWorkspace: false, activated: true, reloadable: false, blockedBy: 'outside-workspace' },
+      { pkg: 'dsh-off', root: ['F:', 'ws', 'dsh-off'].join(BS), inWorkspace: true, activated: false, reloadable: false, blockedBy: 'not-activated' },
+    ],
+  }, null, null] })
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const entry = sectionOf(calls)
+  const dict = calls.locales[0].dicts.zh
+  const tt = (key) => (typeof dict[key] === 'string' ? dict[key] : key)
+  const tree = entry.component({ ...entry.options.inject(), t: tt })
+  const buttons = findAll(tree, (node) => String(node.props?.className || '').includes('dshhr-button') && text(node) === dict.reloadOne)
+  assert.equal(buttons.length, 1, '只要宿主说它在运行，就必须给按钮')
+  const tags = byClass(tree, 'dshhr-tag').map((node) => text(node))
+  assert.deepEqual(tags, [dict.tagReloadable, dict.tagNotActivated])
+  assert.doesNotMatch(text(tree), /工作区/, '界面不提工作区')
+  assert.doesNotMatch(text(tree), /当前无法重载/, '不再有那句没用的兜底文案')
 })
 
 test('三态：loading 显示「读取中」，不冒充「该行未加载」', () => {
