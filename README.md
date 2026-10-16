@@ -191,7 +191,7 @@ dsh plugin --profile <你的profile> add dsh-hot-reloader
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/dsh-hot-reloader` | 完整状态：开关来源、监听了哪些包、扫描 / 重载 / 失败计数、近期日志 |
-| `GET` | `/dsh-hot-reloader/targets?workspace=<路径>` | 列出被监听目标：包名、包根、是否落在给定工作区内 |
+| `GET` | `/dsh-hot-reloader/targets?workspace=<路径>&all=1` | 列出目标：**默认只列可重载的**（落在工作区内、入口已激活、非本插件自身）；`all=1` 连被滤掉的一起列，每条带 `blockedBy`（`outside-workspace` / `not-activated` / `self`），并给出 `hidden` 汇总 |
 | `POST` | `/dsh-hot-reloader/reload` | 手动重载。留空 = 工作区内全部；支持 `["包名"]`、`["路径"]`、`{"targets":[...],"workspace":"...","dryRun":true}` 或旧式 `{"packages":[...]}` |
 | `POST` | `/dsh-hot-reloader/auto` | **持久**开关自动重载（写进 profile patch）：`{"enabled":true\|false\|null}`，`null` = 恢复默认 |
 | `POST` | `/dsh-hot-reloader/toggle` | 仅内存翻转（不落盘），用于「先临时停一下」 |
@@ -254,7 +254,7 @@ curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload \
 
 装好之后，宿主里的 Agent 会多一个 `hot_reload` 工具：
 
-- `action:"list"` —— 先看清楚有哪些可重载目标、哪些在工作区外；
+- `action:"list"` —— **默认只列可重载目标**（并给 hidden 汇总）；`all:true` 看全部条目（工作区外 / 入口未激活 / 本插件自身，各带 `blockedBy`）；
 - `action:"reload"`（默认）—— `targets` 留空 = **当前会话工作区内的全部插件**；
 - `dryRun:true` —— 只回报命中集合，不真的重载；
 - `action:"auto"` + `enabled` —— 切换持久开关。

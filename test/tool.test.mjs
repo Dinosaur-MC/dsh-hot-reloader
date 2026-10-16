@@ -45,6 +45,7 @@ test('PARAMETERS / description 符合 DSH 方言与安全口径', () => {
   assert.equal(PARAMETERS.targets.items.type, 'string')
   assert.equal(PARAMETERS.dryRun.type, 'boolean')
   assert.equal(PARAMETERS.enabled.type, 'boolean')
+  assert.equal(PARAMETERS.all.type, 'boolean')
   for (const [key, spec] of Object.entries(PARAMETERS)) {
     if (spec.type === 'object') assert.ok(Object.hasOwn(spec, 'additionalProperties'), key + ' 缺 additionalProperties')
     if (spec.oneOf) assert.ok(spec.oneOf.length >= 2, key + ' 的 oneOf 分支不足 2 个')
@@ -76,7 +77,7 @@ test('execute：action=list 只列目标，不触发重载', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
   const value = await definition.execute({ action: 'list' }, exec)
-  assert.deepEqual(calls.list, [{ workspace: WORKSPACE }])
+  assert.deepEqual(calls.list, [{ workspace: WORKSPACE, all: false }])
   assert.equal(calls.reload.length, 0)
   assert.equal(value.targets[0].inWorkspace, true)
 })
@@ -129,4 +130,27 @@ test('dsh-tools 不可解析：返回 registered:false 而不是抛错', async (
   const result = await registerHotReloadTool(stubCtx().ctx, deps, { importer: failing })
   assert.equal(result.registered, false)
   assert.match(result.reason, /dsh-tools/)
+})
+test('execute：action=list 的 all 透传，渲染给出 hidden 汇总', async () => {
+  const { deps, calls } = stubDeps({
+    async listTargets(input) {
+      calls.list.push(input)
+      return {
+        targets: [{ pkg: 'a', root: '/ws/a', inWorkspace: true, reloadable: true }],
+        hidden: { count: 2, total: 3, byReason: { 'outside-workspace': 1, 'not-activated': 1 } },
+        listAll: input.all === true,
+        autoEnabled: true,
+      }
+    },
+  })
+  const { definition } = await register(deps)
+  const value = await definition.execute({ action: 'list', all: true }, exec)
+  assert.deepEqual(calls.list, [{ workspace: WORKSPACE, all: true }])
+  assert.equal(value.listAll, true)
+  const text = definition.output.render({}, value).map((block) => block.text).join('\n')
+  assert.match(text, /全部条目/)
+  const filtered = { ...value, listAll: false }
+  const text2 = definition.output.render({}, filtered).map((block) => block.text).join('\n')
+  assert.match(text2, /hidden: 2 个（/)
+  assert.match(text2, /传 all:true 看全部/)
 })

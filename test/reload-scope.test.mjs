@@ -15,7 +15,7 @@ const entryUrl = (pkg) => pathToFileURL(path.join(pkg, 'lib', 'index.js')).href
  * 装配一个桩宿主：捕获定时器、HTTP 路由、tools 注册，loader 树里只有两个假插件。
  * 不启动真实定时器（用桩替换），tick 由测试手动驱动。
  */
-async function harness({ config = {}, settings } = {}) {
+async function harness({ config = {}, settings, fiber = false } = {}) {
   const mod = await import(new URL('../lib/index.js', import.meta.url).href)
   const calls = { entries: 0, imports: [], provides: [], routes: [], tools: [] }
   const timers = { intervals: [], timeouts: [] }
@@ -31,12 +31,13 @@ async function harness({ config = {}, settings } = {}) {
   const entries = specifiers.map(({ name, url }) => ({
     options: { name, id: name },
     parent: { tree: { ctx: { baseUrl: pathToFileURL(WS).href } } },
-    fiber: undefined,
+    // fiber=true 时装一个「活的」入口（state 2 + runtime），用来验 list 的默认过滤。
+    fiber: fiber ? { state: 2, runtime: { callback: function fakeApply() {} } } : undefined,
     url,
   }))
 
   const loader = {
-    entries() { calls.entries += 1; return entries.map(({ options, parent }) => ({ options, parent })) },
+    entries() { calls.entries += 1; return entries.map(({ options, parent, fiber: f }) => ({ options, parent, fiber: f })) },
     async import(url) { calls.imports.push(url); return function fake() {} },
     unwrapExports: (value) => value,
     async await() {},
@@ -100,7 +101,7 @@ test('enabled=false：tick 完全不触达 loader（自动重载被关掉）', a
 
 test('/targets：列出两个目标并标出工作区归属', async () => {
   const h = await harness()
-  const { json } = await h.call({ url: '/dsh-hot-reloader/targets?workspace=' + encodeURIComponent(WS) })
+  const { json } = await h.call({ url: '/dsh-hot-reloader/targets?all=1&workspace=' + encodeURIComponent(WS) })
   assert.equal(json.ok, true)
   const byName = Object.fromEntries(json.targets.map((row) => [row.pkg, row]))
   assert.equal(byName['pkg-a'].inWorkspace, true)
@@ -212,7 +213,7 @@ test('注册了 hot_reload 工具，默认作用域 = 会话工作区', async ()
   assert.equal(value.workspace, WS)
   assert.equal(value.action, 'reload')
   assert.equal(value.skipped.find((row) => row.pkg === 'pkg-a').reason, 'dry-run')
-  const listed = await definition.execute({ action: 'list' }, exec)
+  const listed = await definition.execute({ action: 'list', all: true }, exec)
   assert.equal(listed.targets.find((row) => row.pkg === 'pkg-b').inWorkspace, false)
 })
 
@@ -224,4 +225,31 @@ test('暴露 hotReloader 服务（其它插件可手动触发）', async () => {
   assert.equal(typeof provided.value.list, 'function')
   assert.equal(typeof provided.value.setAuto, 'function')
   assert.equal(provided.value.config.enabled, true)
+})
+test('/targets：默认只列可重载的，工作区外与未激活的进 hidden 汇总', async () => {
+  const h = await harness({ fiber: true })
+  const { json } = await h.call({ url: '/dsh-hot-reloader/targets?workspace=' + encodeURIComponent(WS) })
+  assert.equal(json.listAll, false)
+  assert.deepEqual(json.targets.map((row) => row.pkg), ['pkg-a'])
+  assert.equal(json.targets[0].reloadable, true)
+  assert.equal(json.hidden.count, 1)
+  assert.deepEqual(json.hidden.byReason, { 'outside-workspace': 1 })
+})
+
+test('/targets?all=1：全部条目都列，并标出被拦的原因', async () => {
+  const h = await harness({ fiber: true })
+  const { json } = await h.call({ url: '/dsh-hot-reloader/targets?all=1&workspace=' + encodeURIComponent(WS) })
+  assert.equal(json.listAll, true)
+  const byName = Object.fromEntries(json.targets.map((row) => [row.pkg, row]))
+  assert.equal(byName['pkg-a'].blockedBy, undefined)
+  assert.equal(byName['pkg-b'].blockedBy, 'outside-workspace')
+})
+
+test('/targets：入口未激活的（没有 fiber）默认不列，all=1 时标 not-activated', async () => {
+  const h = await harness()
+  const filtered = await h.call({ url: '/dsh-hot-reloader/targets?workspace=' + encodeURIComponent(WS) })
+  assert.deepEqual(filtered.json.targets, [])
+  assert.deepEqual(filtered.json.hidden.byReason, { 'outside-workspace': 1, 'not-activated': 1 })
+  const all = await h.call({ url: '/dsh-hot-reloader/targets?all=1&workspace=' + encodeURIComponent(WS) })
+  assert.deepEqual(all.json.targets.map((row) => row.blockedBy).sort(), ['not-activated', 'outside-workspace'])
 })

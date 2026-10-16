@@ -199,7 +199,7 @@ Reloads are logged to the host log; you can also check status at any time.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/dsh-hot-reloader` | Full status: where the switch comes from, which packages are watched, scan/reload/failure counters, recent logs |
-| `GET` | `/dsh-hot-reloader/targets?workspace=<path>` | List watched targets: package name, package root, whether it is inside the given workspace |
+| `GET` | `/dsh-hot-reloader/targets?workspace=<path>&all=1` | List targets: by default **only the reloadable ones** (inside the workspace, entry activated, not this plugin itself); `all=1` also lists the filtered-out rows with a `blockedBy` reason (`outside-workspace` / `not-activated` / `self`) and a `hidden` summary |
 | `POST` | `/dsh-hot-reloader/reload` | Manual reload. Empty = everything inside the workspace; accepts `["pkg-name"]`, `["path"]`, `{"targets":[...],"workspace":"...","dryRun":true}` or legacy `{"packages":[...]}` |
 | `POST` | `/dsh-hot-reloader/auto` | **Persistent** auto-reload switch (written into the profile patch): `{"enabled":true\|false\|null}`; `null` restores the default |
 | `POST` | `/dsh-hot-reloader/toggle` | In-memory flip only (not persisted) — for "pause for a moment" |
@@ -262,7 +262,7 @@ Three default refusals show up in the response as `skipped` (never as silent suc
 
 Once installed, agents in the host gain a `hot_reload` tool:
 
-- `action:"list"` — see which targets exist and which are outside the workspace;
+- `action:"list"` — by default **only reloadable targets** (plus a hidden summary); `all:true` lists everything (outside-workspace / not-activated / this plugin), each with a `blockedBy` reason;
 - `action:"reload"` (default) — an empty `targets` means **every plugin inside the current session workspace**;
 - `dryRun:true` — report the match set without reloading;
 - `action:"auto"` + `enabled` — flip the persistent switch.
