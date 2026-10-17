@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FIX = path.join(HERE, 'fixtures')
@@ -205,7 +206,17 @@ test('状态接口带全部开关来源字段', async () => {
   assert.equal(json.allowForeignTargets, false)
 })
 
-test('注册了 hot_reload 工具，默认作用域 = 会话工作区', async () => {
+const PEER_READY = (() => {
+  try {
+    createRequire(import.meta.url).resolve('@deepseek-ai/dsh-tools')
+    return true
+  } catch {
+    return false
+  }
+})()
+const PEER_SKIP = PEER_READY ? false : 'requires an unpacked @deepseek-ai/dsh-tools (DSH ships inside app.asar on this machine)'
+
+test('注册了 hot_reload 工具，默认作用域 = 会话工作区', { skip: PEER_SKIP }, async () => {
   const h = await harness()
   assert.equal(h.calls.tools.length, 1)
   const definition = h.calls.tools[0]

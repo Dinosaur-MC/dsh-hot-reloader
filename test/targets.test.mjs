@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import os from 'node:os'
-import { resolveTargets, isWithin, normalizePathForCompare } from '../lib/targets.js'
+import { findVersionMoves, isWithin, normalizePathForCompare, resolveTargets } from '../lib/targets.js'
 
 const BASE = path.join(os.tmpdir(), 'hot-reloader-targets-test')
 const WS = path.join(BASE, 'ws')
@@ -109,4 +109,25 @@ test('同一目标被多个选择器命中只出现一次', () => {
   const r = resolveTargets(opts({ selectors: ['dsh-onebot-qq', p(WS, 'pkg', 'dsh-onebot-qq')] }))
   assert.deepEqual(names(r), ['dsh-onebot-qq'])
   assert.equal(r.matched.length, 1)
+})
+test('findVersionMoves：同键换包根 = 版本切换', () => {
+  const prev = new Map([['pkg-a', 'C:/p/pnpm/pkg-a@1.0.0/node_modules/pkg-a']])
+  const rows = [{ key: 'pkg-a', root: 'C:/p/pnpm/pkg-a@1.1.0/node_modules/pkg-a' }]
+  const moved = findVersionMoves(prev, rows)
+  assert.deepEqual(moved.get('pkg-a'), { from: 'C:/p/pnpm/pkg-a@1.0.0/node_modules/pkg-a', to: 'C:/p/pnpm/pkg-a@1.1.0/node_modules/pkg-a' })
+})
+
+test('findVersionMoves：包根没变时不算迁移', () => {
+  const prev = new Map([['pkg-a', '/r']])
+  assert.equal(findVersionMoves(prev, [{ key: 'pkg-a', root: '/r' }]).size, 0)
+})
+
+test('findVersionMoves：首次见到的键不算迁移（新装插件不能误判）', () => {
+  assert.equal(findVersionMoves(new Map(), [{ key: 'pkg-b', root: '/x' }]).size, 0)
+})
+
+test('findVersionMoves：缺参照物或无键的行都跳过', () => {
+  assert.equal(findVersionMoves(undefined, [{ key: 'pkg-a', root: '/r' }]).size, 0)
+  assert.equal(findVersionMoves(new Map([['pkg-a', '/r']]), [{ key: '', root: '/r' }]).size, 0)
+  assert.equal(findVersionMoves(new Map([['pkg-a', '/r']]), [{ root: '/r' }]).size, 0)
 })

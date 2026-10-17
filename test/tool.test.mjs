@@ -1,6 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { PARAMETERS, TOOL_NAME, TOOL_DESCRIPTION, registerHotReloadTool } from '../lib/tool.js'
+import { createRequire } from 'node:module'
+import { PARAMETERS, TOOL_DESCRIPTION, TOOL_NAME, registerHotReloadTool } from '../lib/tool.js'
+
+/** DSH 现在只以 app.asar 形式存在：本机没有展开的 @deepseek-ai/dsh-tools 时，定义编译类断言无从执行，如实 skip 而不是假绿。 */
+const PEER_READY = (() => {
+  try {
+    createRequire(import.meta.url).resolve('@deepseek-ai/dsh-tools')
+    return true
+  } catch {
+    return false
+  }
+})()
+const PEER_SKIP = PEER_READY ? false : 'requires an unpacked @deepseek-ai/dsh-tools (DSH ships inside app.asar on this machine)'
+const t = (name, fn) => test(name, { skip: PEER_SKIP }, fn)
 
 const WORKSPACE = 'F:\\AgentGarden'
 const exec = { agent: { session: { header: { cwd: WORKSPACE } } } }
@@ -38,7 +51,7 @@ const register = async (deps, importer) => {
   return { result, definition: captured.definition, captured }
 }
 
-test('PARAMETERS / description 符合 DSH 方言与安全口径', () => {
+t('PARAMETERS / description 符合 DSH 方言与安全口径', () => {
   assert.equal(TOOL_NAME, 'hot_reload')
   assert.match(TOOL_DESCRIPTION, /内存状态/)
   assert.deepEqual(PARAMETERS.action.enum, ['list', 'reload', 'auto'])
@@ -53,7 +66,7 @@ test('PARAMETERS / description 符合 DSH 方言与安全口径', () => {
   }
 })
 
-test('注册：defineTool 编译出合法 definition 并挂进 tools.register', async () => {
+t('注册：defineTool 编译出合法 definition 并挂进 tools.register', async () => {
   const { deps } = stubDeps()
   const { result, definition } = await register(deps)
   assert.equal(result.registered, true)
@@ -65,7 +78,7 @@ test('注册：defineTool 编译出合法 definition 并挂进 tools.register', 
   assert.equal(definition.parameters.properties.enabled, undefined, '不应暴露 enabled 参数')
 })
 
-test('execute：默认 action=reload 且必须显式 targets，工作区取自会话', async () => {
+t('execute：默认 action=reload 且必须显式 targets，工作区取自会话', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
   const value = await definition.execute({ targets: ['dsh-our-free-model'] }, exec)
@@ -76,7 +89,7 @@ test('execute：默认 action=reload 且必须显式 targets，工作区取自�
   assert.equal(value.reloaded[0].pkg, 'dsh-our-free-model')
 })
 
-test('渲染：只读模式输出开关状态（自动重载/自身/跨工作区）', async () => {
+t('渲染：只读模式输出开关状态（自动重载/自身/跨工作区）', async () => {
   const { deps } = stubDeps()
   const { definition } = await register(deps)
   const value = await definition.execute({ action: 'auto' }, exec)
@@ -88,7 +101,7 @@ test('渲染：只读模式输出开关状态（自动重载/自身/跨工作区
   assert.match(blocks[0].text, /跨工作区：关/)
 })
 
-test('权限：传 enabled 被拒绝（开关只读）且不写盘', async () => {
+t('权限：传 enabled 被拒绝（开关只读）且不写盘', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
   const value = await definition.execute({ action: 'auto', enabled: true }, exec)
@@ -97,7 +110,7 @@ test('权限：传 enabled 被拒绝（开关只读）且不写盘', async () =>
   assert.equal(calls.auto.length, 0, '不得写盘')
 })
 
-test('权限：reload 必须显式 targets（留空/空白 = targets-required）', async () => {
+t('权限：reload 必须显式 targets（留空/空白 = targets-required）', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
   assert.equal((await definition.execute({ action: 'reload' }, exec)).error, 'targets-required')
@@ -105,7 +118,7 @@ test('权限：reload 必须显式 targets（留空/空白 = targets-required）
   assert.equal(calls.reload.length, 0, '没有显式目标时不得触发重载')
 })
 
-test('权限：不接受 workspace / all 这类「全部」语义', async () => {
+t('权限：不接受 workspace / all 这类「全部」语义', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
   for (const keyword of ['workspace', 'ALL']) {
@@ -115,7 +128,7 @@ test('权限：不接受 workspace / all 这类「全部」语义', async () => 
   assert.equal(calls.reload.length, 0)
 })
 
-test('execute：action=list 只列目标，不触发重载', async () => {
+t('execute：action=list 只列目标，不触发重载', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
   const value = await definition.execute({ action: 'list' }, exec)
@@ -124,7 +137,7 @@ test('execute：action=list 只列目标，不触发重载', async () => {
   assert.equal(value.targets[0].inWorkspace, true)
 })
 
-test('execute：dryRun 透传，且失败集合非空时 ok=false', async () => {
+t('execute：dryRun 透传，且失败集合非空时 ok=false', async () => {
   const { deps, calls } = stubDeps({
     async reload(input) { calls.reload.push(input); return { reloaded: [], skipped: [], failed: [{ pkg: 'x', error: 'boom' }] } },
   })
@@ -134,7 +147,7 @@ test('execute：dryRun 透传，且失败集合非空时 ok=false', async () => 
   assert.equal(value.ok, false)
 })
 
-test('execute：action=auto 省略 enabled = 只读当前状态', async () => {
+t('execute：action=auto 省略 enabled = 只读当前状态', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
   const missing = await definition.execute({ action: 'auto' }, exec)
@@ -153,14 +166,14 @@ test('execute：action=auto 省略 enabled = 只读当前状态', async () => {
   assert.equal(calls.auto.length, 0, '不得写盘')
 })
 
-test('execute：没有会话工作区时按 undefined 传下去（由上层回落 cwd）', async () => {
+t('execute：没有会话工作区时按 undefined 传下去（由上层回落 cwd）', async () => {
   const { deps, calls } = stubDeps()
   const { definition } = await register(deps)
   await definition.execute({ targets: ['dsh-our-free-model'] }, {})
   assert.equal(calls.reload[0].workspace, undefined)
 })
 
-test('render：返回 [{ type: "text", text }] 内容块数组（宿主对其调 .some）', async () => {
+t('render：返回 [{ type: "text", text }] 内容块数组（宿主对其调 .some）', async () => {
   const { deps } = stubDeps()
   const { definition } = await register(deps)
   const value = await definition.execute({ targets: ['dsh-our-free-model'] }, exec)
@@ -173,14 +186,14 @@ test('render：返回 [{ type: "text", text }] 内容块数组（宿主对其调
   assert.match(text, /F:\\AgentGarden/)
 })
 
-test('dsh-tools 不可解析：返回 registered:false 而不是抛错', async () => {
+t('dsh-tools 不可解析：返回 registered:false 而不是抛错', async () => {
   const { deps } = stubDeps()
   const failing = async () => { throw new Error('ERR_MODULE_NOT_FOUND') }
   const result = await registerHotReloadTool(stubCtx().ctx, deps, { importer: failing })
   assert.equal(result.registered, false)
   assert.match(result.reason, /dsh-tools/)
 })
-test('execute：action=list 的 all 透传，渲染给出 hidden 汇总', async () => {
+t('execute：action=list 的 all 透传，渲染给出 hidden 汇总', async () => {
   const { deps, calls } = stubDeps({
     async listTargets(input) {
       calls.list.push(input)
