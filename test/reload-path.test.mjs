@@ -34,12 +34,18 @@ class Node24LoadCache extends Map {
 }
 
 /** 装配一个能真正跑通「清缓存 → import → registry.delete → 重建 fiber」的桩宿主。 */
-async function harness({ importThrows = false, deleteThrows = false, config = {} } = {}) {
+async function harness({ importThrows = false, deleteThrows = false, config = {}, packages = ['pkg-a'], importDelayMs = 0 } = {}) {
   const mod = await import(new URL('../lib/index.js', import.meta.url).href)
-  const url = pathToFileURL(path.join(PKG_A, 'lib', 'index.js')).href
-  const calls = { imports: [], deleted: [], rebuilt: [], routes: [], entries: 0 }
+  // 每个包各自一个包根 / 入口 / 旧 plugin 函数 —— 与真实宿主一样按「包根」分组重载。
+  const specs = packages.map((name) => {
+    const root = path.join(WS, name)
+    return { name, root, url: pathToFileURL(path.join(root, 'lib', 'index.js')).href }
+  })
+  const url = specs[0].url
+  const calls = { imports: [], deleted: [], rebuilt: [], routes: [], entries: 0, timeline: [], peak: 0 }
 
-  const cache = new Node24LoadCache().put(url, { javascript: { job: 'old-js' }, json: { job: 'old-json' } })
+  const cache = new Node24LoadCache()
+  for (const spec of specs) cache.put(spec.url, { javascript: { job: 'old-js' }, json: { job: 'old-json' } })
   const rebuiltFiber = { uid: 99, await: async () => {}, dispose() {} }
   const registry = {
     plugin(shape, cfg) { calls.rebuilt.push({ shape, cfg }); return { ctx: { fiber: rebuiltFiber } } },
@@ -48,32 +54,46 @@ async function harness({ importThrows = false, deleteThrows = false, config = {}
       calls.deleted.push(plugin)
     },
   }
-  const previousFiber = {
-    uid: 1, state: 2,
-    runtime: null, inject: { loader: null },
-    await: async () => {}, dispose() {},
-    parent: { fiber: { uid: 0 }, registry },
+  const entries = []
+  const plugins = []
+  for (const spec of specs) {
+    const fiber = {
+      uid: 1, state: 2, runtime: null, inject: { loader: null },
+      await: async () => {}, dispose() {},
+      parent: { fiber: { uid: 0 }, registry },
+    }
+    const apply = function fakeApplyMulti() {}
+    fiber.runtime = { callback: apply, Config: { marker: 'old-schema' }, fibers: [fiber] }
+    entries.push({ options: { name: spec.name, id: spec.name }, parent: { tree: { ctx: { baseUrl: pathToFileURL(WS).href } } }, fiber })
+    plugins.push({ spec, apply })
   }
-  const fakeApply = function fakeApply() {}
-  previousFiber.runtime = { callback: fakeApply, Config: { marker: 'old-schema' }, fibers: [previousFiber] }
-  const entry = {
-    options: { name: 'pkg-a', id: 'pkg-a' },
-    parent: { tree: { ctx: { baseUrl: pathToFileURL(WS).href } } },
-    fiber: previousFiber,
-  }
+  const entry = entries[0]
+  const previousFiber = entry.fiber
+  const fakeApply = plugins[0].apply
 
   const loader = {
-    entries() { calls.entries += 1; return [entry] },
+    entries() { calls.entries += 1; return entries },
     async import(u) {
       calls.imports.push(u)
-      if (importThrows) throw new Error('BOOM 重新导入失败')
-      return function replacement() {}
+      // 记录每个 import 的时间区间与并发峰值 —— 这是「并行 vs 串行」唯一的客观证据。
+      calls.inFlight = (calls.inFlight ?? 0) + 1
+      calls.peak = Math.max(calls.peak, calls.inFlight)
+      const row = { url: u, start: Date.now(), end: 0 }
+      calls.timeline.push(row)
+      try {
+        if (importThrows) throw new Error('BOOM 重新导入失败')
+        if (importDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, importDelayMs))
+        return function replacement() {}
+      } finally {
+        row.end = Date.now()
+        calls.inFlight -= 1
+      }
     },
     unwrapExports: (v) => v,
     async await() {},
     internal: {
       getOrCreateModuleJob() { return {} },
-      resolveSync(_b, { specifier }) { return specifier === 'pkg-a' ? url : undefined },
+      resolveSync(_b, { specifier }) { return specs.find((spec) => spec.name === specifier)?.url },
       loadCache: cache,
     },
   }
@@ -107,7 +127,7 @@ async function harness({ importThrows = false, deleteThrows = false, config = {}
     await route.handler(request, response)
     return { status: response.statusCode, json: response.payload ? JSON.parse(response.payload) : undefined }
   }
-  return { mod, calls, cache, url, fakeApply, call, previousFiber }
+  return { mod, calls, cache, url, fakeApply, call, previousFiber, packages: specs }
 }
 
 test('/targets?all=1：工作区外的目标 reloadable=false 但 manualReloadable=true（GUI 点行即授权）', async () => {
@@ -234,4 +254,32 @@ test('严格模式：配置的检查命令失败即拒绝重载；通过则照�
   const good = await passing.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: JSON.stringify({ targets: ['pkg-a'] }) })
   assert.equal(good.json.ok, true, JSON.stringify(good.json.failed))
   assert.equal(passing.calls.imports.length > 0, true, '通过严格模式后应正常 import')
+})
+test('每插件并行：两个插件同批时 import 区间重叠、峰值并发 2，结果按输入顺序', async () => {
+  const h = await harness({
+    packages: ['pkg-a', 'pkg-a2'],
+    importDelayMs: 120,
+    config: { reloadConcurrency: 3, checkSettleMs: 0, checkBeforeReload: false },
+  })
+  const { json } = await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: JSON.stringify({ targets: ['pkg-a', 'pkg-a2'], workspace: WS }) })
+  assert.equal(json.ok, true, JSON.stringify(json.failed))
+  assert.equal(json.reloaded.length, 2)
+  assert.deepEqual(json.reloaded.map((row) => row.pkg), ['pkg-a', 'pkg-a2'], '结果必须与输入同序')
+  assert.equal(h.calls.timeline.length, 2)
+  const rows = [...h.calls.timeline].sort((a, b) => a.start - b.start)
+  assert.ok(rows[0].start < rows[1].end && rows[1].start < rows[0].end, '并行时两个 import 的时间区间必须重叠：' + JSON.stringify(rows))
+  assert.equal(h.calls.peak, 2, '峰值并发应为 2')
+})
+
+test('每插件并行：reloadConcurrency=1 时严格串行（区间不重叠、峰值 1）', async () => {
+  const h = await harness({
+    packages: ['pkg-a', 'pkg-a2'],
+    importDelayMs: 60,
+    config: { reloadConcurrency: 1, checkSettleMs: 0, checkBeforeReload: false },
+  })
+  const { json } = await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: JSON.stringify({ targets: ['pkg-a', 'pkg-a2'], workspace: WS }) })
+  assert.equal(json.reloaded.length, 2)
+  assert.equal(h.calls.peak, 1, 'limit=1 时不应并发')
+  const rows = h.calls.timeline
+  assert.ok(rows[0].end <= rows[1].start || rows[1].end <= rows[0].start, '串行时区间不应重叠：' + JSON.stringify(rows))
 })
