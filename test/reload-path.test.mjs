@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { parseSnapshot } from '../lib/snapshot.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const WS = path.join(HERE, 'fixtures', 'ws')
@@ -87,7 +90,9 @@ async function harness({ importThrows = false, deleteThrows = false, config = {}
     loader,
     registry,
   }
-  mod.apply(ctx, { enabled: false, ...config })
+  // 落盘基线会写到 profileDir：测试必须指到临时目录，否则会污染真实 profile。
+  const profileDir = config.profileDir ?? mkdtempSync(path.join(tmpdir(), 'hr-test-'))
+  mod.apply(ctx, { enabled: false, intervalMs: 50, profileDir, ...config })
   await new Promise((resolve) => setImmediate(resolve))
   const route = calls.routes[0]
   const call = async ({ method = 'GET', url: u = '/dsh-hot-reloader', body = '' } = {}) => {
@@ -180,4 +185,20 @@ test('/auto：非法入参一律 400，绝不静默写成 true', async () => {
     assert.equal(status, 400, 'body=' + JSON.stringify(body) + ' 应被拒绝')
     assert.match(json.error, /invalid-(enabled|body)/)
   }
+})
+test('启动扫一次并落盘快照：写到配置的 profileDir，且能被解析回来', async () => {
+  const profileDir = mkdtempSync(path.join(tmpdir(), 'hr-snap-'))
+  const h = await harness({ config: { profileDir } })
+  const file = path.join(profileDir, 'dsh-hot-reloader.baseline.json')
+  const deadline = Date.now() + 3000
+  while (Date.now() < deadline && !existsSync(file)) await new Promise((r) => setTimeout(r, 40))
+  assert.ok(existsSync(file), '启动后应写出落盘基线')
+  const parsed = parseSnapshot(readFileSync(file, 'utf8'))
+  assert.ok(parsed !== undefined, '落盘内容应可解析')
+  assert.ok(parsed.has(PKG_A), '应包含当前已加载的 fixture 包根')
+  // 关闭期不扫盘：scans 不应随着时间增长
+  const before = (await h.call({ url: '/dsh-hot-reloader' })).json.scans
+  await new Promise((r) => setTimeout(r, 400))
+  const after = (await h.call({ url: '/dsh-hot-reloader' })).json.scans
+  assert.equal(after, before, '关闭时不得持续扫盘')
 })
