@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseSnapshot } from '../lib/snapshot.js'
@@ -201,4 +201,25 @@ test('启动扫一次并落盘快照：写到配置的 profileDir，且能被解
   await new Promise((r) => setTimeout(r, 400))
   const after = (await h.call({ url: '/dsh-hot-reloader' })).json.scans
   assert.equal(after, before, '关闭时不得持续扫盘')
+})
+test('快照体检：入口语法错误时拒绝重载、且不触发 import；dry-run 同样报告', async () => {
+  const h = await harness({ config: { checkSettleMs: 0, checkBeforeReload: true } })
+  const entry = path.join(PKG_A, 'lib', 'index.js')
+  const original = readFileSync(entry, 'utf8')
+  const before = h.calls.imports.length
+  try {
+    writeFileSync(entry, 'export default function broken( {\n')
+    const real = await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: JSON.stringify({ targets: ['pkg-a'] }) })
+    assert.equal(real.json.ok, false, '坏快照不得算成功')
+    assert.equal(real.json.failed.length, 1)
+    assert.match(String(real.json.failed[0].error), /^preflight:syntax/)
+    assert.equal(h.calls.imports.length, before, '体检失败时不得 import（更不能先清缓存）')
+    const dry = await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: JSON.stringify({ targets: ['pkg-a'], dryRun: true }) })
+    assert.equal(dry.json.ok, false, 'dry-run 也要报告坏快照')
+    assert.match(JSON.stringify(dry.json.failed), /preflight:syntax/)
+  } finally {
+    writeFileSync(entry, original)
+  }
+  const healed = await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: JSON.stringify({ targets: ['pkg-a'], dryRun: true }) })
+  assert.equal(healed.json.ok, true, '恢复后 dry-run 应通过')
 })
