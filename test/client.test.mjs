@@ -443,7 +443,9 @@ test('扫描间隔：数字输入来自快照，提交时钳到 [120, 60000] 再
   const input = byClass(tree, 'dshhr-number-input')[0]
   assert.ok(input, '卡片里应有扫描间隔输入框')
   assert.equal(input.props.type, 'number')
-  assert.equal(input.props.value, 2500, '展示值来自快照')
+  assert.equal(input.props.value, undefined, '不得受控：轮询重渲染会覆盖正在输入的内容')
+  assert.equal(input.props.defaultValue, 2500, '展示值来自快照')
+  assert.match(String(input.key ?? input.props.key ?? ''), /2500/, '外部值变化才换 key（重挂显示新值）')
   assert.equal(input.props.min, 120)
   assert.equal(input.props.max, 60000)
   await input.props.onBlur({ target: { value: '999999' } })
