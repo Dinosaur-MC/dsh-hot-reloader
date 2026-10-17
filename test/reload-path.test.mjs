@@ -223,3 +223,15 @@ test('快照体检：入口语法错误时拒绝重载、且不触发 import；d
   const healed = await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: JSON.stringify({ targets: ['pkg-a'], dryRun: true }) })
   assert.equal(healed.json.ok, true, '恢复后 dry-run 应通过')
 })
+test('严格模式：配置的检查命令失败即拒绝重载；通过则照常', async () => {
+  const failing = await harness({ config: { checkSettleMs: 0, checkStrict: true, strictCommands: ['node -e process.exit(1)'], strictTimeoutMs: 15000 } })
+  const before = failing.calls.imports.length
+  const bad = await failing.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: JSON.stringify({ targets: ['pkg-a'] }) })
+  assert.equal(bad.json.ok, false)
+  assert.match(String(bad.json.failed[0].error), /^preflight:strict/)
+  assert.equal(failing.calls.imports.length, before, '严格模式失败时不得 import')
+  const passing = await harness({ config: { checkSettleMs: 0, checkStrict: true, strictCommands: ['node -e process.exit(0)'], strictTimeoutMs: 15000 } })
+  const good = await passing.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: JSON.stringify({ targets: ['pkg-a'] }) })
+  assert.equal(good.json.ok, true, JSON.stringify(good.json.failed))
+  assert.equal(passing.calls.imports.length > 0, true, '通过严格模式后应正常 import')
+})

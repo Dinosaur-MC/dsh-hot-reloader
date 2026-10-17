@@ -61,7 +61,10 @@ test('Config：已导出且只把选定的字段标为 volatile', () => {
   assert.equal(dict.enabled?.meta?.volatile, true)
   assert.equal(dict.quiet?.meta?.volatile, true)
   assert.equal(dict.allowForeignTargets?.meta?.volatile, true)
-  assert.notEqual(dict.intervalMs?.meta?.volatile, true, 'intervalMs 在注册定时器时读取，不应标 volatile')
+  assert.equal(dict.intervalMs?.meta?.volatile, true, 'intervalMs 每轮 tick 前重读 ⇒ 标 volatile，改间隔不必重启宿主')
+  assert.equal(dict.checkStrict?.meta?.volatile, true)
+  assert.equal(dict.strictCommands?.meta?.volatile, true)
+  assert.equal(dict.reloadConcurrency?.meta?.volatile, true)
   assert.equal(dict.reloadSelf?.meta?.volatile, true, 'reloadSelf 每轮扫描都重读 ⇒ 标 volatile，GUI 开关才写得进去')
 })
 
