@@ -283,3 +283,39 @@ test('每插件并行：reloadConcurrency=1 时严格串行（区间不重叠、
   const rows = h.calls.timeline
   assert.ok(rows[0].end <= rows[1].start || rows[1].end <= rows[0].start, '串行时区间不应重叠：' + JSON.stringify(rows))
 })
+test('手动限流：同一目标在间隔内重复重载被跳过，并给出 retryAfterMs', async () => {
+  const h = await harness({ config: { minReloadIntervalMs: 600, checkBeforeReload: false } })
+  const body = JSON.stringify({ targets: ['pkg-a'], workspace: WS })
+  const first = await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body })
+  assert.equal(first.json.ok, true, '第一次应正常重载')
+  const second = await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body })
+  assert.equal(second.json.ok, false, '限流内第二次不得报成功')
+  assert.equal(second.json.reloaded.length, 0)
+  const row = second.json.skipped.find((item) => item.pkg === 'pkg-a')
+  assert.ok(row, '被限流的目标要出现在 skipped 里')
+  assert.equal(row.reason, 'throttled')
+  assert.ok(row.retryAfterMs > 0, '要告诉调用方多久后可重试')
+  assert.equal(h.calls.imports.length, 1, '被限流时不得真的重新 import')
+})
+
+test('手动限流：minReloadIntervalMs=0 时关闭限流', async () => {
+  const h = await harness({ config: { minReloadIntervalMs: 0, checkBeforeReload: false } })
+  const body = JSON.stringify({ targets: ['pkg-a'], workspace: WS })
+  await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body })
+  await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body })
+  assert.equal(h.calls.imports.length, 2, '关闭限流后两次都应真的重载')
+})
+test('同一插件两次并发重载不交叠：排队执行、峰值并发 1、两次都成功', async () => {
+  const h = await harness({ importDelayMs: 120, config: { minReloadIntervalMs: 0, checkBeforeReload: false } })
+  const body = JSON.stringify({ targets: ['pkg-a'], workspace: WS })
+  const [a, b] = await Promise.all([
+    h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body }),
+    h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body }),
+  ])
+  assert.equal(h.calls.timeline.length, 2, '两次都要真的执行（不是丢一次）')
+  assert.equal(h.calls.peak, 1, '同一包根的重载不得交叠')
+  const rows = h.calls.timeline
+  assert.ok(rows[0].end <= rows[1].start || rows[1].end <= rows[0].start, '两次 import 的区间必须不重叠')
+  assert.equal(a.json.ok, true)
+  assert.equal(b.json.ok, true)
+})

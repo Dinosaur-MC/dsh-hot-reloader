@@ -65,6 +65,8 @@ test('Config：已导出且只把选定的字段标为 volatile', () => {
   assert.equal(dict.checkStrict?.meta?.volatile, true)
   assert.equal(dict.strictCommands?.meta?.volatile, true)
   assert.equal(dict.reloadConcurrency?.meta?.volatile, true)
+  assert.equal(dict.minReloadIntervalMs?.meta?.volatile, true, '手动限流间隔要能热改')
+  assert.equal(DEFAULTS.minReloadIntervalMs, 800, '默认 800ms（0 = 关闭）')
   assert.equal(dict.reloadSelf?.meta?.volatile, true, 'reloadSelf 每轮扫描都重读 ⇒ 标 volatile，GUI 开关才写得进去')
 })
 
