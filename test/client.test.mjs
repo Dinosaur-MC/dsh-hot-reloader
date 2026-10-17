@@ -217,7 +217,7 @@ test('reloadSelf 开关：勾选态来自快照，拨动写入 path=[reloadSelf]
   const face = entry.options.inject()
   const tree = entry.component({ ...face, t: (key) => key })
   const boxes = byClass(tree, 'dshhr-checkbox')
-  assert.equal(boxes.length, 4, '四个开关：自动热重载 / 自身 / 项目外 / 严格模式')
+  assert.equal(boxes.length, 5, '五个开关：自动热重载 / 自身 / 项目外 / 严格模式 / 显示头部按钮')
   assert.equal(boxes[0].props.label, 'autoReload')
   assert.equal(boxes[1].props.label, 'autoReloadSelf')
   assert.equal(boxes[2].props.label, 'allowForeign')
@@ -303,7 +303,7 @@ test('拿不到首方 primitives 时回落到纯 DOM input（卡片仍可渲染�
   mod.apply(ctx)
   const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
   const boxes = byClass(tree, 'dshhr-checkbox')
-  assert.equal(boxes.length, 4, '四个开关都回落成原生 input')
+  assert.equal(boxes.length, 5, '五个开关都回落成原生 input')
   assert.equal(boxes[0].type, 'input')
   assert.equal(boxes[0].props.checked, true)
 })
@@ -567,4 +567,29 @@ test('重挂不闪：座位暂时查不到项目时，仍按记忆渲染（不�
   // 连座位都没有时也要靠记忆撑住。
   const third = renderUtilities(entry.component, { sessionId: 's1', t: (key) => key })
   assert.ok(third, '没有 useWorkspaces 座位时同样不得消失')
+})
+test('头部按钮开关：卡片里勾掉后，头部组件立即返回 null（同一 bundle 共享状态）', () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
+  const toggle = byClass(tree, 'dshhr-checkbox').find((node) => node.props?.label === 'showHeader')
+  assert.ok(toggle, '卡片里应有「显示会话头部快捷按钮」开关')
+  assert.equal(toggle.props.checked, true, '默认显示')
+  // 第一次渲染头部（能查到项目，故会渲染出按钮）
+  const before = renderUtilities(utilitiesEntry(calls).component, {
+    sessionId: 's1',
+    t: (key) => key,
+    useWorkspaces: (selector) => selector({ items: [{ path: 'F:\\ws', title: 'ws', sessionIds: ['s1'] }] }),
+  })
+  assert.ok(before, '开关打开时应渲染按钮')
+  toggle.props.onChange(false)
+  const after = renderUtilities(utilitiesEntry(calls).component, {
+    sessionId: 's1',
+    t: (key) => key,
+    useWorkspaces: (selector) => selector({ items: [{ path: 'F:\\ws', title: 'ws', sessionIds: ['s1'] }] }),
+  })
+  assert.equal(after, null, '关掉后头部不再渲染按钮')
+  const written = calls.mutate.at(-1)?.ops ?? []
+  assert.deepEqual(written, [{ op: 'set', path: ['showHeaderButton'], value: false }], '同时要把开关持久化到配置')
 })
