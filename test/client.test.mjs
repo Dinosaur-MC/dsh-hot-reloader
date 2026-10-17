@@ -39,7 +39,7 @@ function stubCtx(over = {}) {
     status: over.status ?? 'ready',
     writable: over.writable ?? true,
     revision: 7,
-    value: { enabled: over.enabled ?? true, reloadSelf: over.reloadSelf === true },
+    value: { enabled: over.enabled ?? true, reloadSelf: over.reloadSelf === true, ...(over.value ?? {}) },
     base: {},
     user: {},
   }
@@ -433,3 +433,19 @@ test('词典本身不许出现「工作区 / workspace」（那是工具的门�
   for (const [key, value] of Object.entries(en)) assert.doesNotMatch(value, /workspace/i, 'en.' + key)
 })
 
+test('扫描间隔：数字输入来自快照，提交时钳到 [120, 60000] 再写 intervalMs', async () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx({ value: { intervalMs: 2500 } })
+  mod.apply(ctx)
+  const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
+  const input = byClass(tree, 'dshhr-number-input')[0]
+  assert.ok(input, '卡片里应有扫描间隔输入框')
+  assert.equal(input.props.type, 'number')
+  assert.equal(input.props.value, 2500, '展示值来自快照')
+  assert.equal(input.props.min, 120)
+  assert.equal(input.props.max, 60000)
+  await input.props.onBlur({ target: { value: '999999' } })
+  assert.deepEqual(calls.mutate.at(-1).ops, [{ op: 'set', path: ['intervalMs'], value: 60000 }], '超上限要钳到 60000')
+  await input.props.onBlur({ target: { value: '50' } })
+  assert.deepEqual(calls.mutate.at(-1).ops, [{ op: 'set', path: ['intervalMs'], value: 120 }], '低于下限要钳到 120')
+})
