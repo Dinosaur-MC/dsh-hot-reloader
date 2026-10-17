@@ -15,6 +15,7 @@ function makeReact(seq = []) {
     }),
     useState: (initial) => [seq.length > 0 ? seq.shift() : (typeof initial === 'function' ? initial() : initial), () => {}],
     useEffect: () => {},
+    useRef: (initial) => ({ current: initial }),
   }
 }
 const primitives = { Checkbox: function Checkbox() {}, Button: function Button() {} }
@@ -52,7 +53,8 @@ function stubCtx(over = {}) {
     effect: (fn) => fn(),
     locale: {
       register: (ns, dicts) => { calls.locales.push({ ns, dicts }); return () => {} },
-      bind: () => (key) => key,
+      // 与真实 locale 一致：带参数时做插值，便于断言文案里确实带上了项目名
+      bind: () => (key, params) => (params ? `${key}(${JSON.stringify(params)})` : key),
     },
     configForms: {
       get: (id) => { calls.get = id; if (over.getThrows) throw new Error('未服务'); return scope },
@@ -105,12 +107,12 @@ test('客户端半：导出 apply/inject，inject 只要三个服务', () => {
   assert.deepEqual(mod.inject, ['slots', 'locale', 'configForms'])
 })
 
-test('注册两个座位：settings.section 与 plugins.row.config', () => {
+test('注册三个座位：session header utilities / settings.section / plugins.row.config', () => {
   const mod = loadClientHalf()
   const { ctx, calls } = stubCtx()
   mod.apply(ctx)
   assert.equal(calls.get, 'dsh-hot-reloader')
-  assert.equal(calls.registered.length, 2)
+  assert.equal(calls.registered.length, 3)
   const section = sectionOf(calls)
   assert.equal(section.options.id, 'hot-reloader')
   assert.equal(typeof section.options.order, 'number')
@@ -448,4 +450,119 @@ test('扫描间隔：数字输入来自快照，提交时钳到 [120, 60000] 再
   assert.deepEqual(calls.mutate.at(-1).ops, [{ op: 'set', path: ['intervalMs'], value: 60000 }], '超上限要钳到 60000')
   await input.props.onBlur({ target: { value: '50' } })
   assert.deepEqual(calls.mutate.at(-1).ops, [{ op: 'set', path: ['intervalMs'], value: 120 }], '低于下限要钳到 120')
+})
+const utilitiesEntry = (calls) => calls.registered.find((row) => row.options.name === 'conversation.session.header.utilities')
+const renderUtilities = (component, props) => {
+  // 头部按钮分了三层（座位分流 → Body），逐层调用直到得到 DOM 元素。
+  let node = component(props)
+  for (let depth = 0; depth < 6 && node && typeof node.type === 'function'; depth += 1) {
+    node = node.type(node.props)
+  }
+  return node
+}
+
+test('session header utilities：注册带 id/order（与 dsh-save-money 同款列表槽）', () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const entry = utilitiesEntry(calls)
+  assert.ok(entry, '必须注册 conversation.session.header.utilities（不能碰 single 的 conversation.header）')
+  assert.equal(entry.options.id, 'hot-reloader-project')
+  assert.equal(typeof entry.options.order, 'number')
+})
+
+test('session header utilities：点击重载当前对话所属项目，POST /reload { workspace }', async () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const tree = renderUtilities(utilitiesEntry(calls).component, {
+    sessionId: 's1',
+    t: (key, params) => (params ? `${key}(${JSON.stringify(params)})` : key),
+    useWorkspaces: (selector) => selector({ items: [{ path: 'F:\\ws', title: 'ws', sessionIds: ['s1'] }] }),
+  })
+  assert.ok(tree, '会话属于某项目时应渲染按钮')
+  const button = findAll(tree, (node) => String(node.props?.className || '').includes('dshhr-header-button'))[0]
+  assert.ok(button, '应有快捷重载按钮')
+  const svg = findAll(tree, (node) => node.type === 'svg')[0]
+  assert.ok(svg, '按钮应带图标（内联 SVG + currentColor）')
+  assert.equal(svg.props['aria-hidden'], 'true')
+  assert.equal(button.props.title, undefined, '不用原生 title —— 会被视口裁掉')
+  const onLabel = findAll(tree, (node) => String(node.props?.className || '').includes('is-on'))[0]
+  assert.ok(onLabel, '应有当前状态文案')
+  assert.equal(text(onLabel), 'reloadProject', '常态文字写在按钮里')
+  const candidates = findAll(tree, (node) => String(node.props?.className || '').includes('dshhr-header-label-item'))
+  assert.ok(candidates.length >= 5, '宽度要由多个候选文案撑住（含成功计数）')
+  assert.match(JSON.stringify(candidates.map((node) => node.props.children)), /reloadProjectDone/, '含两位数计数的预估值，避免计数变宽时抖一下')
+  assert.equal(
+    findAll(tree, (node) => String(node.props?.className || '').includes('dshhr-header-note')).length,
+    0,
+    '状态不再挂在按钮旁边（改为改变按钮文字）',
+  )
+  const tip = findAll(tree, (node) => node.props?.role === 'tooltip')[0]
+  assert.ok(tip, '应有自绘 tooltip')
+  assert.equal(button.props['aria-describedby'], tip.props.id, 'tooltip 必须与按钮关联')
+  const tipText = JSON.stringify(tip.props.children)
+  assert.match(tipText, /reloadProjectTip/, 'tooltip 首行是动作说明')
+  assert.match(tipText, /reloadProjectTipHint/, 'tooltip 次行是影响范围说明')
+  assert.match(tipText, /ws/, 'tooltip 里带项目名')
+  const seen = []
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url, init })
+    return { json: async () => ({ ok: true, reloaded: [{ pkg: 'pkg-a' }], failed: [] }) }
+  }
+  try { await button.props.onClick() } finally { delete globalThis.fetch }
+  const call = seen.find((row) => row.url === '/dsh-hot-reloader/reload')
+  assert.ok(call, '必须 POST 到 /reload')
+  assert.deepEqual(JSON.parse(call.init.body), { workspace: 'F:\\ws' })
+})
+
+test('session header utilities：没有项目时按钮仍在但禁用（不留空帧）', () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const entry = utilitiesEntry(calls)
+  // 会话不属于任何项目：按钮必须仍然渲染，只是禁用 —— 否则重挂时会出现空帧（闪动）。
+  const other = renderUtilities(entry.component, {
+    sessionId: 's9',
+    t: (key) => key,
+    useWorkspaces: (selector) => selector({ items: [{ path: 'F:\\ws', sessionIds: ['s1'] }] }),
+  })
+  assert.ok(other, '没有项目时也要渲染按钮（禁用），不能返回 null')
+  const otherButton = findAll(other, (node) => String(node.props?.className || '').includes('dshhr-header-button'))[0]
+  assert.equal(otherButton.props.disabled, true)
+  const otherOn = findAll(other, (node) => String(node.props?.className || '').includes('is-on'))[0]
+  assert.equal(text(otherOn), 'reloadProject', '没有项目时文案仍是常态那条（按钮禁用）')
+  const noSeat = renderUtilities(entry.component, { sessionId: 's1', t: (key) => key })
+  assert.ok(noSeat, '没有座位时同样要渲染（禁用）')
+  const noSeatTip = findAll(noSeat, (node) => node.props?.role === 'tooltip')[0]
+  assert.match(JSON.stringify(noSeatTip.props.children), /reloadProjectNoProject/)
+})
+test('按钮提示会自动消失：成功/无事可做 2.5s，失败 6s', () => {
+  const mod = loadClientHalf()
+  const { noteTtlMs } = mod.__internals
+  assert.equal(noteTtlMs(false), 2500, '成功或没有可重载插件时 2.5s 后消失')
+  assert.equal(noteTtlMs(true), 6000, '失败留 6s 给用户读错误')
+  assert.equal(noteTtlMs(undefined), 2500)
+})
+test('重挂不闪：座位暂时查不到项目时，仍按记忆渲染（不得消失）', () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const entry = utilitiesEntry(calls)
+  const first = renderUtilities(entry.component, {
+    sessionId: 's1',
+    t: (key) => key,
+    useWorkspaces: (selector) => selector({ items: [{ path: 'F:\\ws', title: 'ws', sessionIds: ['s1'] }] }),
+  })
+  assert.ok(first, '首次渲染应有按钮')
+  // 模拟平台重建贡献 / 组件重挂：座位还在但这一帧查不到该会话。
+  const second = renderUtilities(entry.component, {
+    sessionId: 's-other',
+    t: (key) => key,
+    useWorkspaces: (selector) => selector({ items: [] }),
+  })
+  assert.ok(second, '重挂后不得因为「查不到项目」而返回 null（那就是闪动的来源）')
+  // 连座位都没有时也要靠记忆撑住。
+  const third = renderUtilities(entry.component, { sessionId: 's1', t: (key) => key })
+  assert.ok(third, '没有 useWorkspaces 座位时同样不得消失')
 })
