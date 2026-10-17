@@ -2,7 +2,16 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import os from 'node:os'
-import { findVersionMoves, isWithin, normalizePathForCompare, resolveTargets } from '../lib/targets.js'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import {
+  findVersionMoves,
+  isWithin,
+  matchTargetsByPackageName,
+  normalizePathForCompare,
+  projectPackageNames,
+  readPackageName,
+  resolveTargets,
+} from '../lib/targets.js'
 
 const BASE = path.join(os.tmpdir(), 'hot-reloader-targets-test')
 const WS = path.join(BASE, 'ws')
@@ -130,4 +139,42 @@ test('findVersionMoves：缺参照物或无键的行都跳过', () => {
   assert.equal(findVersionMoves(undefined, [{ key: 'pkg-a', root: '/r' }]).size, 0)
   assert.equal(findVersionMoves(new Map([['pkg-a', '/r']]), [{ key: '', root: '/r' }]).size, 0)
   assert.equal(findVersionMoves(new Map([['pkg-a', '/r']]), [{ root: '/r' }]).size, 0)
+})
+test('projectPackageNames：深度优先找包名，跳过 node_modules，尊重上限', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'hr-proj-'))
+  const makePkg = (rel, name) => {
+    const dir = path.join(root, rel)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name }), 'utf8')
+  }
+  makePkg('a', 'pkg-a')
+  makePkg(path.join('deep', 'b'), 'pkg-b')
+  makePkg(path.join('node_modules', 'c'), 'pkg-hidden')
+  const names = projectPackageNames(root)
+  assert.ok(names.has('pkg-a'))
+  assert.ok(names.has('pkg-b'), '深层目录里的包也要找到')
+  assert.equal(names.has('pkg-hidden'), false, 'node_modules 要跳过')
+  const shallow = projectPackageNames(root, { maxDepth: 1 })
+  assert.equal(shallow.has('pkg-b'), false, '受 maxDepth 约束')
+})
+
+test('matchTargetsByPackageName：按 manifest 名或 pkgName 裸名匹配已加载目标', () => {
+  const names = new Set(['dsh-alpha', 'dsh-beta'])
+  const targets = [
+    { pkgName: 'dsh-alpha', root: 'C:\\p\\dsh-alpha', packageName: 'dsh-alpha' },
+    { pkgName: 'dsh-beta/sub', root: 'C:\\p\\dsh-beta' },
+    { pkgName: 'dsh-gamma', root: 'C:\\p\\dsh-gamma', packageName: 'dsh-gamma' },
+  ]
+  const hit = matchTargetsByPackageName(targets, names).map((item) => item.pkgName)
+  assert.deepEqual(hit, ['dsh-alpha', 'dsh-beta/sub'], '子路径 entry 用裸名匹配')
+  assert.deepEqual(matchTargetsByPackageName(targets, new Set()), [])
+  assert.deepEqual(matchTargetsByPackageName(targets, undefined), [])
+})
+
+test('readPackageName：读不到返回 undefined', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'hr-pkg-'))
+  assert.equal(readPackageName(root), undefined)
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'x-y' }), 'utf8')
+  assert.equal(readPackageName(root), 'x-y')
+  assert.equal(readPackageName(''), undefined)
 })
