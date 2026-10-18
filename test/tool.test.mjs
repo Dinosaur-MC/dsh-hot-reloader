@@ -198,7 +198,10 @@ t('execute：action=list 的 all 透传，渲染给出 hidden 汇总', async () 
     async listTargets(input) {
       calls.list.push(input)
       return {
-        targets: [{ pkg: 'a', root: '/ws/a', inWorkspace: true, reloadable: true }],
+        targets: [
+          { pkg: 'a', root: '/ws/a', inWorkspace: true, reloadable: true },
+          { pkg: 'dsh-ops/file', root: 'C:\\Users\\x\\.dsh\\profiles\\desktop\\node_modules\\dsh-ops\\lib\\components\\file', inWorkspace: true, reloadable: true },
+        ],
         hidden: { count: 2, total: 3, byReason: { 'outside-workspace': 1, 'not-activated': 1 } },
         listAll: input.all === true,
         autoEnabled: true,
@@ -215,4 +218,6 @@ t('execute：action=list 的 all 透传，渲染给出 hidden 汇总', async () 
   const text2 = definition.output.render({}, filtered).map((block) => block.text).join('\n')
   assert.match(text2, /hidden: 2 个（/)
   assert.doesNotMatch(text2, /all:true/, '输出不再邀请模型传 all=true')
+  assert.doesNotMatch(text, /C:\\Users|\/ws\/a/, '列表文本里不出现绝对路径')
+  assert.match(text, /- dsh-ops\/file/, '包名本身就是短标识')
 })
