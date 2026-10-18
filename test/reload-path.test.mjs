@@ -319,3 +319,12 @@ test('同一插件两次并发重载不交叠：排队执行、峰值并发 1、
   assert.equal(a.json.ok, true)
   assert.equal(b.json.ok, true)
 })
+test('/targets：项目里只有同名项目目录时，已加载插件也算属于该项目（按包名兜底）', async () => {
+  const h = await harness()
+  const named = path.join(HERE, 'fixtures', 'outside-named')
+  const { json } = await h.call({ url: '/dsh-hot-reloader/targets?workspace=' + encodeURIComponent(named) })
+  const row = json.targets.find((item) => item.pkg === 'pkg-a')
+  assert.ok(row, '默认列表就应出现 pkg-a（不必传 all）')
+  assert.equal(row.inWorkspace, true, '包名匹配到了项目里的 pkg-a/package.json')
+  assert.equal(row.reloadable, true)
+})

@@ -214,5 +214,5 @@ t('execute：action=list 的 all 透传，渲染给出 hidden 汇总', async () 
   const filtered = { ...value, listAll: false }
   const text2 = definition.output.render({}, filtered).map((block) => block.text).join('\n')
   assert.match(text2, /hidden: 2 个（/)
-  assert.match(text2, /传 all:true 看全部/)
+  assert.doesNotMatch(text2, /all:true/, '输出不再邀请模型传 all=true')
 })
