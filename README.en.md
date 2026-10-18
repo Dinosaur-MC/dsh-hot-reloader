@@ -207,7 +207,19 @@ Reloads are logged to the host log; you can also check status at any time.
 
 ### GUI switch
 
-This plugin ships a **browser half** (`lib/client.js` + `dsh.client` in package.json) that contributes a **"Hot reloader" section to the Settings page**: the automatic-reload switch plus a status line (watched targets / files / reloads since start).
+This plugin ships a **browser half** (`lib/client.js` + `dsh.client` in package.json) that contributes a **"Hot reloader" section to the Settings page**:
+
+| Control | Effect |
+|---|---|
+| Automatic reload | master switch (same as `POST /auto`) |
+| Auto-reload this plugin itself | `reloadSelf`, only when the master switch is on |
+| Allow cross-workspace reloads | `allowForeignTargets` |
+| Strict mode (typecheck / lint) | `checkStrict`; runs `strictCommands` after the snapshot check passes |
+| Show conversation-header button | `showHeaderButton`; off removes the button from the conversation header |
+| Poll interval (ms) | `intervalMs`; save on blur/Enter and it takes effect on the **next** scan |
+| Manual reload throttle (ms) | `minReloadIntervalMs`; repeat clicks on the same plugin inside the window are skipped (0 = off) |
+
+The card also shows a **status line** (watched targets / files / reloads) and a **"reload a specific plugin" list**.
 
 > Seats: the primary one is `settings.section` (the settings-page section seat most UIs render). It also registers the first-party `plugins.row.config` seat (a plugin row's Configure page) — that seat has **no renderer** in aggregate third-party UIs such as `@linxin666/dsh-web-all`, so registering it produces no UI there.
 
@@ -215,10 +227,19 @@ This plugin ships a **browser half** (`lib/client.js` + `dsh.client` in package.
 - The card does **not** depend on the "auto-generated settings page" renderer (some deployments' third-party UI bundles never render that) — it registers its own seat and renders itself;
 - The status line reads this plugin's `GET /dsh-hot-reloader`; when the host is down it says so.
 - The card lists **manually reloadable plugins**: `GET /dsh-hot-reloader/targets?all=1` renders every target (tagged “outside workspace / not activated”) with a per-row **Reload** button → `POST /dsh-hot-reloader/reload {targets:[name], workspace:<that target's root>}` and an inline result (reloaded / skipped / failed: reason). Passing the root is the explicit per-click authorisation, so npm-installed plugins in the profile can be reloaded too.
-- **This plugin never reloads the page**: the host reports `lib/client.js`'s mtime and the card only shows a text hint (“restart DSH to load it”).
+- **This plugin never reloads the page**: the host reports `lib/client.js`'s mtime and the card only shows a text hint (“refresh the page if it still looks stale”) — the host ships the browser half in real time, so normally even that is unnecessary.
   > 2026-10-17 incident: an earlier version put a `location.reload()` button here and clicking it crashed DSH (the desktop window's session credential is injected by the host at window creation, so navigating reloads the window unauthenticated). It is gone, with a regression guard: any `.reload(` / `location.href =` / `location.assign(` in the browser half fails the tests.
 
-Changing `dsh.client` needs a **DSH restart** (the client-plugin manifest loads at host boot). Host-half edits still hot-reload.
+The browser half is **shipped by the host in real time**: changing `lib/client.js` or `dsh.client` needs neither a DSH restart nor a page refresh.
+
+### Conversation-header button
+
+When "Show conversation-header button" is on, the conversation header gets a button that **reloads the plugins of the project this conversation belongs to** in one click.
+
+- Project membership comes from the `useWorkspaces` snapshot (`sessionIds`), not from any global "current workspace" state; when no project matches, the button is disabled rather than disappearing.
+- The result is written into the button label: `Reloading…` / `Reloaded N` / `Nothing to reload` / `Reload failed`; it reverts after 2.5 s (6 s on failure).
+- Throttled clicks show "Try again shortly"; a project with no loaded plugin shows "No loaded plugin in this project".
+- The button width is locked to the widest candidate label, so status changes never shift the header.
 
 > **`dsh.client.inject` is intentionally empty**: it lists **client plugin ids**; naming one a deployment does not provide makes the browser half wait forever and never apply (measured here: this third-party aggregate UI registers its 25 client plugin ids under `@linxin666/*`, so copying first-party `@deepseek-ai/dsh-client-*` ids keeps the card from ever appearing). Seats and services are used on demand inside `apply()`.
 
@@ -269,10 +290,10 @@ Three default refusals show up in the response as `skipped` (never as silent suc
 
 Once installed, agents in the host gain a `hot_reload` tool:
 
-- `action:"list"` — by default **only reloadable targets** (plus a hidden summary); `all:true` lists everything (outside-workspace / not-activated / this plugin), each with a `blockedBy` reason;
-- `action:"reload"` (default) — an empty `targets` means **every plugin inside the current session workspace**;
-- `dryRun:true` — report the match set without reloading;
-- `action:"auto"` + `enabled` — flip the persistent switch.
+- `action:"list"` — by default lists **what belongs to the current project** (workspace path match, or a `package.json` `name` in the project matching the plugin's package name); the rendered text shows package names only, never absolute paths. `all:true` is for troubleshooting (also lists not-activated / outside-workspace / this plugin);
+- `action:"reload"` (default) — **`targets` is required** (package name or path); omitting it returns `targets-required`, and the broad keywords `workspace` / `all` return `broad-target-rejected`;
+- `dryRun:true` — resolve and report the match set and the blocked targets without reloading;
+- `action:"auto"` — **read-only** switch state (`enabled` / `source: config|runtime` / `reloadSelf` / `allowForeignTargets` / `quiet`). The model cannot write switches: passing `enabled` is rejected with `error:"read-only"`.
 
 The default scope is literally "the workspace this agent is in" (`exec.agent.session.header.cwd`), so "I edited a plugin in my workspace, now reload it" needs no absolute paths from the model. The tool description states that a reload drops the target plugin's in-memory state.
 
@@ -306,23 +327,38 @@ Override the row in your profile's `cordis.patch.yml`:
 ```yaml
 - id: dsh-hot-reloader
   config:
-    enabled: true         # master switch for automatic reload (also togglable in Settings → Plugins)
-    intervalMs: 1000      # polling interval (ms); changing it needs the host to remount this plugin
-    allowForeignTargets: false  # allow manual/tool reloads of plugins whose root is outside the given workspace
-    debounceMs: 400       # settle time after a change is detected (ms)
-    reloadSelf: false     # also auto-reload this plugin itself
-    only: []              # watch only these package names (empty = all)
-    except: []            # skip these package names
-    extraRoots: []        # extra absolute paths to watch (dirs not in the loader tree)
-    includeAsar: false    # also watch host packages inside app.asar
+    enabled: true                 # master switch (Settings card or POST /auto)
+    intervalMs: 1000              # poll interval; volatile — takes effect on the next scan, no restart
+    debounceMs: 400               # settle time after a change is detected
+    reloadSelf: false             # also auto-reload this plugin itself
+    reloadConcurrency: 3          # plugins reloaded in parallel per batch (1 = serial, max 8)
+    minReloadIntervalMs: 800      # per-root throttle for manual entries (ms, 0 = off)
+    checkBeforeReload: true       # pre-reload snapshot check (unsettled / empty / syntax error)
+    checkSettleMs: 150            # how long a file must be quiet to count as settled
+    checkStrict: false            # strict mode: run commands after the snapshot check passes
+    strictCommands: []            # commands run in the package root; any non-zero exit blocks the reload
+    strictTimeoutMs: 20000        # per-command timeout in strict mode
+    showHeaderButton: true        # show the conversation-header reload button
+    allowForeignTargets: false    # allow reloads of plugins whose root is outside the given workspace
+    only: []                      # watch only these package names (empty = all)
+    except: []                    # skip these package names
+    extraRoots: []                # extra absolute paths to watch (dirs not in the loader tree)
+    includeAsar: false            # also watch host packages inside app.asar
     ignore: ['.bak', '.test.', '.spec.', '.map']   # skip by filename substring
-    maxDepth: 8           # max directory recursion depth
-    quiet: false          # quiet mode: only record failures
-    installQuietMs: 8000  # how long to step aside after a package-manager op is seen (ms); 0 = off
-    profileDir: ''        # the profile directory; derived from the loader tree by default
+    maxDepth: 8                   # max directory recursion depth
+    quiet: false                  # quiet mode: only record failures
+    installQuietMs: 8000          # how long to step aside after a package-manager op (0 = off)
+    profileDir: ''                # the profile directory; derived from the loader tree by default
 ```
 
 `installQuietMs` is the **step-aside mechanism**: on detecting that pnpm is operating (rewriting `pnpm-lock.yaml`, `.modules.yaml`, etc.) the plugin pauses scanning so it doesn't interfere while directories are being swapped. The default 8-second window covers an ordinary install; raise it for very large packages. Setting it to `0` disables the step-aside (not recommended — scanning during an install can catch a half-written package).
+
+**Four safety layers** (all visible or editable in the GUI):
+
+1. **Snapshot check** (`checkBeforeReload`): before reloading, re-read the changed files — unsettled, empty, or syntactically broken (parsed with `vm.SourceTextModule`) files are rejected **before** the module cache is cleared; dry-runs run the same check. If the parser itself is unavailable it fails open and reports `degraded`.
+2. **Strict mode** (`checkStrict` + `strictCommands`): after the snapshot check passes, run commands in the package root (typecheck / lint); any non-zero exit or timeout blocks the reload.
+3. **Manual throttle** (`minReloadIntervalMs`): repeat manual requests for the same root inside the window are skipped with `{reason:'throttled', retryAfterMs}`; automatic reloads rely on `debounceMs` instead.
+4. **Per-plugin mutex**: one serial chain per package root, so two reloads of the same plugin always queue and never overlap; different plugins still run in parallel up to `reloadConcurrency`.
 
 
 A couple of practical setups:
@@ -363,6 +399,9 @@ Listed honestly, to save you some debugging:
 - **A reload loses that plugin's in-memory state** (in-flight connections, caches, timers). Most plugins re-establish it on rebuild, but long-lived-connection plugins may see a brief interruption at the moment of reload
 - **It depends on host internals** — module replacement needs Node's internal loader structures (`--expose-internals`) and Cordis's `registry`/`loader`, which are not stable public APIs. A DSH upgrade may require follow-up adaptation
 - **Host side only** — the browser side (`lib/client.js` etc.) is handled by DSH's own `dsh-client-hmr` and is unaffected by this plugin
+- **New config keys and the browser half are shipped by the host in real time**: a new config key shows up in the settings form as the plugin reloads, with no host restart; `lib/client.js` edits reach the UI immediately as well
+- **Project membership may fall back to package names**: when the loaded plugin is a real copy inside the profile, path matching cannot see your project, so the plugin also matches by "a `package.json` `name` in the project = the plugin's package name". A third-party plugin with the same name will therefore count as part of the project too
+
 
 ### ⚠️ What this plugin cannot do: install / update a plugin package
 

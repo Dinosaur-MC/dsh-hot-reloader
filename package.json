@@ -1,7 +1,7 @@
 {
   "name": "dsh-hot-reloader",
-  "version": "0.1.0",
-  "description": "DSH 插件热重载器：改完插件源码即刻生效，无需重启 DeepSeek Harness。补上宿主内置 dsh-hmr 因排除 node_modules 而覆盖不到的第三方插件场景。Hot-reload DSH plugin source without restarting the harness.",
+  "version": "0.2.0",
+  "description": "DSH 插件热重载器：改完插件源码即刻生效，无需重启 DeepSeek Harness。带设置页控制台、会话头部一键重载、LLM 工具，以及重载前快照体检 / 严格模式 / 限流 / 同插件互斥等安全护栏。Hot-reload DSH plugin source without restarting the harness, with a settings console, a header button, an LLM tool and pre-reload guardrails.",
   "private": false,
   "type": "module",
   "main": "lib/index.js",

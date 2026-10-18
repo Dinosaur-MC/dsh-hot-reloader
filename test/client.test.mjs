@@ -289,7 +289,7 @@ test('状态行走平台插值：t(key, params) 拿到 targets/files/reloads', (
   assert.equal(text(status), '3|42|5')
 })
 
-test('过期提示是文字（没有刷新按钮）：mtime 不同即提示重启', () => {
+test('过期提示是文字（没有刷新按钮）：mtime 不同即提示刷新页面', () => {
   const mod = loadClientHalf({ seq: [undefined, { clientScriptMtimeMs: 200 }, false, 100, null, null, null] })
   const { ctx, calls } = stubCtx()
   mod.apply(ctx)

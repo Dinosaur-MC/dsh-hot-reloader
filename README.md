@@ -192,14 +192,26 @@ dsh plugin --profile <你的profile> add dsh-hot-reloader
 |---|---|---|
 | `GET` | `/dsh-hot-reloader` | 完整状态：开关来源、监听了哪些包、扫描 / 重载 / 失败计数、近期日志 |
 | `GET` | `/dsh-hot-reloader/targets?workspace=<路径>&all=1` | 列出目标：**默认只列可重载的**（落在工作区内、入口已激活、非本插件自身）；`all=1` 连被滤掉的一起列，每条带 `blockedBy`（`outside-workspace` / `not-activated` / `self`），并给出 `hidden` 汇总 |
-| `POST` | `/dsh-hot-reloader/reload` | 手动重载。留空 = 工作区内全部；支持 `["包名"]`、`["路径"]`、`{"targets":[...],"workspace":"...","dryRun":true}` 或旧式 `{"packages":[...]}` |
+| `POST` | `/dsh-hot-reloader/reload` | 手动重载。留空 = 工作区内全部（**仅 HTTP**；工具要求点名）；支持 `["包名"]`、`["路径"]`、`{"targets":[...],"workspace":"...","dryRun":true}` 或旧式 `{"packages":[...]}` |
 | `POST` | `/dsh-hot-reloader/auto` | **持久**开关自动重载（写进 profile patch）：`{"enabled":true\|false\|null}`，`null` = 恢复默认 |
 | `POST` | `/dsh-hot-reloader/toggle` | 仅内存翻转（不落盘），用于「先临时停一下」 |
 | `POST` | `/dsh-hot-reloader/self-reload` | 重载本插件自身（开发这个插件时用） |
 
 ### 图形界面开关
 
-本插件带**浏览器半**（`lib/client.js` + package.json 的 `dsh.client`），会在 **设置页**贡献一节「热重载器」：**两个开关**（自动热重载 / 自动重载本插件自身）+ 状态行（监听目标数 / 文件数 / 重载次数）+ 手动重载指定插件的列表。
+本插件带**浏览器半**（`lib/client.js` + package.json 的 `dsh.client`），会在 **设置页**贡献一节「热重载器」：
+
+| 控件 | 作用 |
+|---|---|
+| 自动热重载 | 总开关（等价于 `POST /auto`） |
+| 自动重载本插件自身 | `reloadSelf`，只在总开关打开时生效 |
+| 跨工作区重载 | `allowForeignTargets` |
+| 严格模式（类型检查 / lint） | `checkStrict`；开启后在体检通过后再跑 `strictCommands` |
+| 显示会话头部快捷按钮 | `showHeaderButton`，关掉后对话头部不再出现那个按钮 |
+| 扫描间隔（毫秒） | `intervalMs`，失焦或回车保存，**下一轮扫描即生效** |
+| 手动重载限流（毫秒） | `minReloadIntervalMs`，同一插件在窗口内重复点会被跳过（0 = 关闭） |
+
+卡片还带**状态行**（监听目标数 / 文件数 / 重载次数）与**「手动重载指定插件」列表**。
 
 > 座位说明：主入口是 `settings.section`（设置页的 section 座位，多数 UI 都渲染）；同时也注册首方的 `plugins.row.config`（插件行 Configure 页座位）——那一位在第三方聚合 UI（如 `@linxin666/dsh-web-all`）里**没有渲染者**，注册它不产生任何界面。
 
@@ -209,10 +221,19 @@ dsh plugin --profile <你的profile> add dsh-hot-reloader
 - 卡片里有 **「手动重载指定插件」** 列表：`GET /dsh-hot-reloader/targets?all=1` 列出全部目标，每行一个「重载」按钮 → `POST /dsh-hot-reloader/reload {targets:[包名], workspace:该目标包根}`，行内回显「已重载 / 已跳过 / 重载失败: 原因」。
 - 标签与口径（`listTargets` 的字段）：`reloadable`＝默认作用域内可重载（工具/HTTP 默认口径）；`manualReloadable`＝**点名可重载**（已激活且非自身，与作用域无关），GUI 用它决定是否给按钮——所以装在任意目录（含别的项目目录）的插件也能一键重载，点行即视为你点名授权（内部把该目标自己的包根当 workspace 传下去）。
 - **GUI 里不提「工作区」**：那是会话/宿主侧的概念（工具的默认作用域），在插件配置页显示「工作区外」只会让人困惑。界面只区分「可重载 / 未激活 / 本插件自身」，且只出现本地化文案，不显示 `outside-workspace`、`not-activated` 这类机器码（这些口径只出现在工具输出与 HTTP 响应里，供模型/脚本使用）。列表里也**不显示插件目录**：用户不需要知道插件装在哪，点行重载即可。
-- **本插件不做页面刷新**：宿主状态里会报出 `lib/client.js` 的 mtime，磁盘上有新版本时卡片只给一句文字提示「重启 DSH 后生效」。
+- **本插件不做页面刷新**：宿主状态里会报出 `lib/client.js` 的 mtime，磁盘上有新版本时卡片只给一句文字提示「刷新页面即可」——宿主会实时下发浏览器半，通常连刷新都不需要。
   > 2026-10-17 真机事故：早先版本在这个位置放了 `location.reload()` 按钮，点击会让 DSH 崩溃（桌面窗口的会话凭据由宿主开窗时注入，页面导航后窗口回到未授权状态）。现已移除，并有回归守卫：源码出现 `.reload(` / `location.href =` / `location.assign(` 即测试失败。
 
-改动 `dsh.client` 之后要**重启 DSH**（客户端插件清单在宿主启动时装载）；只改宿主半仍然免重启。
+浏览器半由宿主**实时下发**：改 `lib/client.js` 或 `dsh.client` 之后不需要重启 DSH，也不需要刷新页面。
+
+### 会话头部按钮
+
+设置页卡片里的「显示会话头部快捷按钮」打开时，对话头部右侧会多一个按钮：**点一下重载「当前对话所属项目」里的插件**。
+
+- 项目归属按 `useWorkspaces` 快照里的 `sessionIds` 反查得到，不依赖任何全局「当前工作区」状态；查不到时按钮禁用而不是消失。
+- 结果直接写在按钮文字里：`重载中…` / `已重载 N 个` / `没有可重载的插件` / `重载失败`；2.5 秒（失败 6 秒）后自动恢复。
+- 被限流时显示「稍后再试」；项目里没有已加载插件时显示「这个项目没有已加载的插件」。
+- 按钮宽度按最长候选文案锁死，状态切换不会让头部跟着位移。
 
 > **`dsh.client.inject` 故意留空**：它列的是**客户端插件 id**，列了而该部署没有，浏览器半就会一直等依赖、**永不 apply**（本机实测：这套第三方聚合 UI 的 25 个 client 插件 id 全是 `@linxin666/*`，抄首方 `@deepseek-ai/dsh-client-*` 会让卡片永远不出现）。座位与服务在 `apply()` 里按需使用，不依赖它。
 
@@ -263,12 +284,11 @@ curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload \
 
 装好之后，宿主里的 Agent 会多一个 `hot_reload` 工具：
 
-- `action:"list"` —— **默认只列可重载目标**（并给 hidden 汇总）；`all:true` 看全部条目（工作区外 / 入口未激活 / 本插件自身，各带 `blockedBy`）；
-- `action:"reload"`（默认）—— `targets` 留空 = **当前会话工作区内的全部插件**；
-- `dryRun:true` —— 只回报命中集合，不真的重载；
+- `action:"list"` —— 默认按「属于当前项目」列出（工作区内路径匹配，或项目里 `package.json` 的 `name` 对上插件包名）；渲染文本只给包名，不给绝对路径。`all:true` 仅供排查（连未激活 / 工作区外 / 自身一起列）；
+- `action:"reload"`（默认）—— **必须显式给 `targets`**（包名或路径）；留空返回 `targets-required`，`workspace` / `all` 这类「全部」关键词返回 `broad-target-rejected`；
+- `dryRun:true` —— 只解析并回报命中集合与被拦下的目标，不真的重载；
 - `action:"auto"` —— **只读**返回开关状态（`enabled` / `source: config|runtime` / `reloadSelf` / `allowForeignTargets` / `quiet`）。
   **LLM 没有写开关的能力**：传 `enabled` 会被拒绝（`error: "read-only"`）；开关只能由用户在宿主设置页或 `POST /auto` 修改。
-- `action:"reload"` —— **必须显式给 `targets`**（包名或路径）；留空返回 `targets-required`，`workspace` / `all` 这类「全部」关键词返回 `broad-target-rejected`。
   作用域固定为当前会话工作区：范围外的目标只记进 `skipped`，不会被重载。
 
 作用域默认就是「模型所在的那个工作区」（`exec.agent.session.header.cwd`），所以「改了工作区里的插件源码 → 让模型自己重载」不需要它知道任何绝对路径。重载会丢目标插件的内存状态，工具说明里写明了这一点。
@@ -303,23 +323,38 @@ curl -X POST http://127.0.0.1:19387/dsh-hot-reloader/reload \
 ```yaml
 - id: dsh-hot-reloader
   config:
-    enabled: true         # 自动重载总开关（也可在宿主「设置 → 插件」里直接切换）
-    intervalMs: 1000      # 轮询间隔（毫秒）；改动需宿主重挂本插件才生效
-    allowForeignTargets: false  # 是否允许手动/工具重载「包根不在给定工作区内」的插件
-    debounceMs: 400       # 检测到变更后，等写入稳定的时间（毫秒）
-    reloadSelf: false     # 是否连同本插件自己一起自动重载（设置页有开关；只在 enabled 打开时生效）
-    only: []              # 只监听这些包名（留空 = 全部）
-    except: []            # 跳过这些包名
-    extraRoots: []        # 额外监听的绝对路径（不在 loader 树里的目录）
-    includeAsar: false    # 是否连 app.asar 内的宿主包一起监听
+    enabled: true                 # 自动重载总开关（设置页 / POST /auto 可改）
+    intervalMs: 1000              # 轮询间隔；volatile，改完下一轮生效（不必重启宿主）
+    debounceMs: 400               # 检测到变更后等写入稳定的时间
+    reloadSelf: false             # 是否连本插件自己一起自动重载
+    reloadConcurrency: 3          # 同批并行重载几个插件（1 = 串行，上限 8）
+    minReloadIntervalMs: 800      # 手动入口的每包根限流（毫秒，0 = 关闭）
+    checkBeforeReload: true       # 重载前做快照体检（未写稳 / 空文件 / 语法错误）
+    checkSettleMs: 150            # 「文件还在写」的判定窗口
+    checkStrict: false            # 严格模式：体检通过后再跑检查命令
+    strictCommands: []            # 严格模式命令（在包根依次执行，非 0 即拒绝重载）
+    strictTimeoutMs: 20000        # 单条严格命令超时
+    showHeaderButton: true        # 是否显示会话头部「重载当前项目」按钮
+    allowForeignTargets: false    # 是否允许重载「包根不在给定工作区内」的插件
+    only: []                      # 只监听这些包名（留空 = 全部）
+    except: []                    # 跳过这些包名
+    extraRoots: []                # 额外监听的绝对路径（不在 loader 树里的目录）
+    includeAsar: false            # 是否连 app.asar 内的宿主包一起监听
     ignore: ['.bak', '.test.', '.spec.', '.map']   # 按文件名子串跳过
-    maxDepth: 8           # 目录递归深度上限
-    quiet: false          # 静默模式：只记录失败
-    installQuietMs: 8000  # 识别到包管理操作后的让路时长（毫秒）；0 = 关闭该机制
-    profileDir: ''        # profile 目录；默认从 loader 树自动推导
+    maxDepth: 8                   # 目录递归深度上限
+    quiet: false                  # 静默模式：只记录失败
+    installQuietMs: 8000          # 识别到包管理操作后的让路时长（0 = 关闭该机制）
+    profileDir: ''                # profile 目录；默认从 loader 树自动推导
 ```
 
 `installQuietMs` 是**装包让路**机制：检测到 pnpm 正在操作（改写 `pnpm-lock.yaml`、`.modules.yaml` 等）时暂停扫描，避免在它换目录的窗口里添乱。默认 8 秒窗口足够覆盖一次普通安装；装了很大的包时可以调大。设成 `0` 则关闭让路（不建议——那样装包期间可能撞上半成品状态）。
+
+**四层安全护栏**（都可在 GUI 里看到或改到）：
+
+1. **快照体检**（`checkBeforeReload`）：重载前读一遍改动过的文件——没写稳、空文件、语法错（`vm.SourceTextModule` 解析）直接拒绝，且在清模块缓存**之前**拦下；dry-run 也做同样的体检。解析器本身不可用时 fail-open 并标注 `degraded`。
+2. **严格模式**（`checkStrict` + `strictCommands`）：体检通过后在包根依次跑命令（类型检查 / lint），任一条非 0 或超时即拒绝。
+3. **手动限流**（`minReloadIntervalMs`）：同一包根在窗口内的重复手动请求直接跳过，返回 `{reason:'throttled', retryAfterMs}`；只作用于手动入口，自动路径靠 `debounceMs`。
+4. **同插件互斥**：每个包根一条串行链，同一插件的两次重载永远排队、不交叠；不同插件仍按 `reloadConcurrency` 并行。
 
 
 几个实用场景：
@@ -360,6 +395,9 @@ config:
 - **重载会丢掉该插件持有的内存状态**（进行中的连接、缓存、定时器等）。多数插件在重建时会自己恢复，但长连接类插件在重载的瞬间可能有短暂中断
 - **依赖宿主内部接口** —— 模块替换需要 Node 的 loader 内部结构（`--expose-internals`）与 Cordis 的 `registry`/`loader`，这些不是稳定的公开 API。DSH 升级后可能需要跟着适配
 - **只覆盖 host 侧** —— 浏览器侧（`lib/client.js` 等）由 DSH 自带的 `dsh-client-hmr` 负责，不受本插件影响
+- **新配置键与浏览器半都由宿主实时下发**：新增 Config 键会随插件重载出现在设置表单里，不需要重启宿主；`lib/client.js` 的改动同样即时到达界面
+- **项目归属可能按包名认**：被加载的是 profile 里的真实副本时，路径匹配不到你的项目，于是会按「项目里 `package.json` 的 `name` = 插件包名」再认一次。同名第三方插件因此也会被算作本项目
+
 
 ### ⚠️ 这个插件管不了的：安装 / 更新插件包
 
