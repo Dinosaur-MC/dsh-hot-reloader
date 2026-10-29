@@ -174,6 +174,59 @@ test('目标列表：每行一个插件，可重载的给按钮，自身只给�
   assert.match(text(tree), /tagSelf/, '自身那行只给说明（t 在测试里返回 key）')
 })
 
+test('重载列表搜索：按包名/入口名过滤，大小写不敏感，空查询原样返回', () => {
+  const mod = loadClientHalf()
+  const { filterTargetRows } = mod.__internals
+  const rows = [
+    { pkg: 'dsh-context' },
+    { pkg: 'dsh-ops/file', entries: ['dsh-ops', 'dsh-ops/file', 'dsh-ops/lib/x'] },
+    { pkg: '@scope/pkg' },
+  ]
+  assert.equal(filterTargetRows(rows, '').length, 3, '空查询返回全部')
+  assert.deepEqual(filterTargetRows(rows, 'DSH-OPS').map((row) => row.pkg), ['dsh-ops/file'], '大小写不敏感，且能匹配入口名')
+  assert.deepEqual(filterTargetRows(rows, ' file ').map((row) => row.pkg), ['dsh-ops/file'], '首尾空格忽略')
+  assert.deepEqual(filterTargetRows(rows, 'scope').map((row) => row.pkg), ['@scope/pkg'])
+  assert.deepEqual(filterTargetRows(rows, 'nope'), [], '没命中返回空')
+  assert.deepEqual(filterTargetRows(undefined, 'x'), [], '非数组输入不抛')
+})
+
+test('重载列表搜索：输入即过滤，显示匹配数，无命中给提示', () => {
+  const mod = loadClientHalf({ seq: [undefined, null, false, null, {
+    failed: false,
+    rows: [
+      { pkg: 'pkg-a', root: 'F:\\ws\\pkg-a', inWorkspace: true, activated: true, reloadable: true },
+      { pkg: 'pkg-b', root: 'F:\\ws\\pkg-b', inWorkspace: true, activated: true, reloadable: true },
+    ],
+  }, null, null, 'pkg-b'] })
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
+  const input = findAll(tree, (node) => String(node.props?.className || '').includes('dshhr-search-input'))[0]
+  assert.ok(input, '列表上方应有搜索框')
+  assert.equal(input.props.type, 'search')
+  assert.equal(typeof input.props.onChange, 'function')
+  const isRow = (node) => String(node.props?.className || '').split(/\s+/).includes('dshhr-item')
+  const items = findAll(tree, isRow)
+  assert.equal(items.length, 1, '只保留匹配的行')
+  assert.match(text(items[0]), /pkg-b/)
+  assert.match(text(tree), /searchCount/, '显示匹配数')
+  const clear = findAll(tree, (node) => String(node.props?.className || '').includes('dshhr-button') && text(node) === 'searchClear')[0]
+  assert.ok(clear, '有查询时给清除按钮')
+})
+
+test('重载列表搜索：没有命中时给「没有匹配」提示，而不是「没有可重载」', () => {
+  const mod = loadClientHalf({ seq: [undefined, null, false, null, {
+    failed: false,
+    rows: [{ pkg: 'pkg-a', root: 'F:\\ws\\pkg-a', inWorkspace: true, activated: true, reloadable: true }],
+  }, null, null, 'zzz'] })
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const tree = sectionOf(calls).component(cardProps(sectionOf(calls)))
+  assert.equal(findAll(tree, (node) => String(node.props?.className || '').split(/\s+/).includes('dshhr-item')).length, 0)
+  assert.match(text(tree), /searchEmpty/)
+  assert.doesNotMatch(text(tree), /noTargets/, '库里有插件，只是没匹配，不能说「没有可重载的插件」')
+})
+
 test('点某行的「重载」：POST /reload，带该目标自己的包根作为作用域', async () => {
   const mod = loadClientHalf({ seq: [undefined, null, false, null, {
     failed: false,
