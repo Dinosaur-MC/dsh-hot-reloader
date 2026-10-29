@@ -518,6 +518,47 @@ test('session header utilities：点击重载当前对话所属项目，POST /re
   assert.deepEqual(JSON.parse(call.init.body), { workspace: 'F:\\ws' })
 })
 
+test('session header utilities：失败时面板显示错误全文，可一键复制', async () => {
+  const mod = loadClientHalf()
+  const { ctx, calls } = stubCtx()
+  mod.apply(ctx)
+  const entry = utilitiesEntry(calls)
+  const props = {
+    sessionId: 's1',
+    t: (key, params) => (params ? `${key}(${JSON.stringify(params)})` : key),
+    useWorkspaces: (selector) => selector({ items: [{ path: 'F:\\ws', title: 'ws', sessionIds: ['s1'] }] }),
+  }
+  const tree = renderUtilities(entry.component, props)
+  const button = findAll(tree, (node) => String(node.props?.className || '').includes('dshhr-header-button'))[0]
+  const full = '重建 fiber 失败：cannot get property "webServer" without inject'
+  globalThis.fetch = async () => ({ json: async () => ({ ok: false, reloaded: [], failed: [{ pkg: 'pkg-a', error: full }] }) })
+  const written = []
+  try {
+    await button.props.onClick()
+    const after = renderUtilities(entry.component, props)
+    const body = findAll(after, (node) => String(node.props?.className || '').includes('dshhr-header-error-body'))[0]
+    assert.ok(body, '失败后要弹出错误详情面板（不能只塞进 tooltip）')
+    assert.equal(text(body), `pkg-a\n${full}`, '面板里是错误全文（含包名）')
+    const errorButtons = findAll(after, (node) => String(node.props?.className || '').includes('dshhr-header-error-button'))
+    assert.equal(errorButtons.length, 2, '面板里有「复制错误」与「关闭」')
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { clipboard: { writeText: async (value) => { written.push(value) } } },
+    })
+    try { await errorButtons[0].props.onClick() } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'navigator', descriptor)
+      else delete globalThis.navigator
+    }
+    assert.deepEqual(written, [`pkg-a\n${full}`], '复制的是完整错误文本')
+    errorButtons[1].props.onClick()
+    const cleared = renderUtilities(entry.component, props)
+    assert.equal(findAll(cleared, (node) => String(node.props?.className || '') === 'dshhr-header-error').length, 0, '关闭后面板消失')
+  } finally {
+    delete globalThis.fetch
+  }
+})
+
 test('session header utilities：没有项目时按钮仍在但禁用（不留空帧）', () => {
   const mod = loadClientHalf()
   const { ctx, calls } = stubCtx()

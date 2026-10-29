@@ -34,7 +34,7 @@ class Node24LoadCache extends Map {
 }
 
 /** 装配一个能真正跑通「清缓存 → import → registry.delete → 重建 fiber」的桩宿主。 */
-async function harness({ importThrows = false, deleteThrows = false, config = {}, packages = ['pkg-a'], importDelayMs = 0 } = {}) {
+async function harness({ importThrows = false, deleteThrows = false, hmrThrows = false, config = {}, packages = ['pkg-a'], importDelayMs = 0 } = {}) {
   const mod = await import(new URL('../lib/index.js', import.meta.url).href)
   // 每个包各自一个包根 / 入口 / 旧 plugin 函数 —— 与真实宿主一样按「包根」分组重载。
   const specs = packages.map((name) => {
@@ -105,7 +105,13 @@ async function harness({ importThrows = false, deleteThrows = false, config = {}
       if (deps.includes('webServer')) cb({ effect: (fn) => fn(), webServer })
       if (deps.includes('tools')) cb({ tools: { register: () => () => {} }, effect: (fn) => fn() })
     },
-    get() { return undefined },
+    get(name) {
+      if (name === 'hmr' && hmrThrows) {
+        // 模拟宿主 HMR 事务在「还没开始跑」之外的失败：这条错误必须被折成失败行，不能穿透给调用方。
+        return { runExclusive: async () => { throw new Error('事务挂了') } }
+      }
+      return undefined
+    },
     provide() {},
     loader,
     registry,
@@ -171,6 +177,14 @@ test('重新导入失败时回滚：LoadCache 记录原样恢复（两参 set �
   assert.deepEqual(restored, { javascript: { job: 'old-js' }, json: { job: 'old-json' } }, '回滚必须把整条记录放回去')
   assert.equal(json.ok, false)
   assert.match(json.failed[0].error, /重新导入失败/)
+})
+
+test('未预期异常不穿透：批次抛错时返回逐目标失败行（HTTP 仍是 200，不是 500）', async () => {
+  const h = await harness({ hmrThrows: true })
+  const { status, json } = await h.call({ method: 'POST', url: '/dsh-hot-reloader/reload', body: JSON.stringify({ targets: ['pkg-a'], workspace: WS }) })
+  assert.equal(status, 200, '重载失败不能让 HTTP 层变成 500（开启开关时更不能把错误抛回宿主）')
+  assert.equal(json.ok, false)
+  assert.match(json.failed[0].error, /事务挂了/)
 })
 
 test('dispose 失败不许报成功：ok=false 且 reason 说明已拆状态', async () => {
